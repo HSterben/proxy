@@ -5,7 +5,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // Existing message APIs
-  sendMessage: (message) => ipcRenderer.invoke('send-message', message),
+  sendMessage: (payload) => ipcRenderer.invoke('send-message', payload),
+  getPendingChatStart: () => ipcRenderer.invoke('get-pending-chat-start'),
   hideWindow: () => ipcRenderer.invoke('hide-window'),
   getMessage: () => ipcRenderer.invoke('get-message'),
   closeMessageWindow: () => ipcRenderer.invoke('close-message-window'),

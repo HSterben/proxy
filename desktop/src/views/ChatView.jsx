@@ -1037,10 +1037,23 @@ const ChatView = () => {
     }
   }, [presets, messages]);
 
-  const startConversationFromPrompt = useCallback((initialMessage) => {
-    const text = String(initialMessage || '').trim();
-    if (!text) return;
-    pendingPromptRef.current = text;
+  const startConversationFromPrompt = useCallback((initial) => {
+    const text =
+      typeof initial === 'string'
+        ? String(initial || '').trim()
+        : String(initial?.message || initial?.text || '').trim();
+    const imagePayloads = Array.isArray(initial?.images)
+      ? initial.images.filter((img) => img?.dataUrl)
+      : [];
+    if (!text && imagePayloads.length === 0) return;
+
+    const files = imagePayloads.map((img) => ({
+      dataUrl: img.dataUrl,
+      type: img.type || 'image/png',
+      name: img.name || 'attachment.png',
+    }));
+
+    pendingPromptRef.current = { text, files };
     bootstrappedAiRef.current = false;
     sessionOptionsRef.current = null;
     presetSyncedRef.current = false;
@@ -1051,38 +1064,62 @@ const ChatView = () => {
     setMessages([
       {
         id: Date.now(),
-        text,
+        text: text || (files.length > 0 ? 'Attached files' : ''),
         sender: 'user',
         timestamp: new Date(),
+        images: files.map((f) => f.dataUrl),
+        files,
       },
     ]);
-    conversationContext.current = [{ text, sender: 'user' }];
+    conversationContext.current = [
+      {
+        text,
+        sender: 'user',
+        images: files.length > 0 ? files.map((f) => f.dataUrl) : undefined,
+      },
+    ];
     stickToBottomRef.current = true;
 
     if (isAuthenticatedRef.current === true && getAIResponseRef.current) {
       bootstrappedAiRef.current = true;
       pendingPromptRef.current = null;
-      void getAIResponseRef.current(text);
+      void getAIResponseRef.current(text, files);
     }
   }, []);
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const encodedData = urlParams.get('data');
-    if (!encodedData) return;
-    try {
-      const data = JSON.parse(decodeURIComponent(encodedData));
-      const initialMessage = data.message || '';
-      if (initialMessage) startConversationFromPrompt(initialMessage);
-    } catch (error) {
-      console.error('Error parsing message data:', error);
-    }
+    let cancelled = false;
+    const boot = async () => {
+      try {
+        const pending = await window.electronAPI?.getPendingChatStart?.();
+        if (cancelled) return;
+        if (pending && (pending.message || pending.images?.length)) {
+          startConversationFromPrompt(pending);
+          return;
+        }
+      } catch (err) {
+        console.error('getPendingChatStart failed:', err);
+      }
+      // Legacy fallback: initial message embedded in the URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const encodedData = urlParams.get('data');
+      if (!encodedData) return;
+      try {
+        const data = JSON.parse(decodeURIComponent(encodedData));
+        if (data.message || data.images?.length) startConversationFromPrompt(data);
+      } catch (error) {
+        console.error('Error parsing message data:', error);
+      }
+    };
+    void boot();
+    return () => {
+      cancelled = true;
+    };
   }, [startConversationFromPrompt]);
 
   useEffect(() => {
     return window.electronAPI?.onChatStart?.((payload) => {
-      const message = typeof payload === 'string' ? payload : payload?.message;
-      startConversationFromPrompt(message);
+      startConversationFromPrompt(payload);
     });
   }, [startConversationFromPrompt]);
 
@@ -1090,11 +1127,13 @@ const ChatView = () => {
   useEffect(() => {
     if (isAuthenticated !== true) return;
     if (bootstrappedAiRef.current) return;
-    const prompt = pendingPromptRef.current;
-    if (!prompt || isLoading) return;
+    const pending = pendingPromptRef.current;
+    if (!pending || isLoading) return;
     bootstrappedAiRef.current = true;
     pendingPromptRef.current = null;
-    void getAIResponseRef.current?.(prompt);
+    const text = typeof pending === 'string' ? pending : pending.text || '';
+    const files = typeof pending === 'string' ? [] : pending.files || [];
+    void getAIResponseRef.current?.(text, files);
   }, [isAuthenticated, isLoading]);
 
   useEffect(() => {
@@ -1116,21 +1155,28 @@ const ChatView = () => {
 
   useEffect(() => {
     const handlePaste = async (e) => {
-      for (const item of e.clipboardData?.items ?? []) {
-        if (item.type.indexOf('image') === -1) continue;
+      const items = Array.from(e.clipboardData?.items ?? []).filter((item) =>
+        item.type.startsWith('image/'),
+      );
+      if (items.length === 0) return;
+      e.preventDefault();
+      for (const item of items) {
         const file = item.getAsFile();
         if (!file) continue;
-        e.preventDefault();
         try {
           const dataUrl = await fileToBase64(file);
           setAttachedFiles((prev) => [
             ...prev,
-            { file, dataUrl, type: file.type, name: `pasted-${Date.now()}.${file.type.split('/')[1] || 'png'}` },
+            {
+              file,
+              dataUrl,
+              type: file.type,
+              name: `pasted-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
+            },
           ]);
         } catch (err) {
           console.error('Error pasting image:', err);
         }
-        break;
       }
     };
     document.addEventListener('paste', handlePaste);
@@ -1476,10 +1522,10 @@ const ChatView = () => {
           </div>
         )}
 
-        {false && attachedFiles.length > 0 && (
+        {attachedFiles.length > 0 && (
           <div className="chat-attachments">
             {attachedFiles.map((fileData, idx) => (
-              <div key={idx} className="chat-attachment-item">
+              <div key={`${fileData.name}-${idx}`} className="chat-attachment-item">
                 {fileData.type.startsWith('image/') ? (
                   <img src={fileData.dataUrl} alt={fileData.name} className="attachment-preview" />
                 ) : (
@@ -1511,6 +1557,27 @@ const ChatView = () => {
 
         <form className="chat-input-container" onSubmit={handleSubmit}>
           <input
+            type="file"
+            ref={fileInputRef}
+            className="chat-file-input"
+            accept="image/*,application/pdf"
+            multiple
+            onChange={handleFileSelect}
+            aria-label="Attach file"
+          />
+          <button
+            type="button"
+            className="chat-attach-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading}
+            aria-label="Attach file"
+            title="Attach image or PDF"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+          <input
             type="text"
             className="chat-input-field"
             placeholder="Message PROXY…"
@@ -1535,7 +1602,7 @@ const ChatView = () => {
           <button
             type="submit"
             className="chat-input-submit"
-            disabled={!inputValue.trim() || isLoading}
+            disabled={(!inputValue.trim() && attachedFiles.length === 0) || isLoading}
             aria-label="Send message"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
