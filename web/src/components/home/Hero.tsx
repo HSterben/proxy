@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import Orb from '../Orb'
 import { DESKTOP_DOWNLOAD_URL } from '../../data/content'
 import { productImages } from '../../data/productImages'
+import { smoothScrollTo } from '../../lib/smoothScroll'
 
 export default function Hero() {
   const reduce = useReducedMotion()
@@ -94,10 +95,7 @@ export default function Hero() {
                 className="link-underline-light mt-5 w-fit"
                 onClick={(e) => {
                   e.preventDefault()
-                  document.getElementById('features')?.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start',
-                  })
+                  smoothScrollTo('features')
                 }}
               >
                 See how PROXY works

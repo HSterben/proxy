@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowUpRight, Menu, X } from 'lucide-react'
+import { ScrollSmoother } from 'gsap/ScrollSmoother'
 import { DESKTOP_DOWNLOAD_URL, navLinks } from '../../data/content'
+import { smoothScrollTo } from '../../lib/smoothScroll'
 import BrandMark from '../ui/BrandMark'
 import AccountMenu from './AccountMenu'
 
@@ -23,7 +25,7 @@ function NavItems({
 }) {
   const navigate = useNavigate()
   const { pathname } = useLocation()
-  const idle = inverted ? 'text-light/75 hover:text-light' : 'text-ink/55 hover:text-ink'
+  const idle = inverted ? 'text-light/85 hover:text-light' : 'text-ink/70 hover:text-ink'
   const active = inverted ? 'text-light' : 'text-ink'
 
   return (
@@ -39,7 +41,7 @@ function NavItems({
               onNavigate?.()
               const id = link.href.slice(2) // "/#features" → "features"
               if (pathname === '/') {
-                document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                smoothScrollTo(id)
                 window.history.replaceState(null, '', `#${id}`)
               } else {
                 navigate({ pathname: '/', hash: id })
@@ -87,9 +89,11 @@ function useNavTone(): 'light' | 'dark' {
     update()
     window.addEventListener('scroll', update, { passive: true })
     window.addEventListener('resize', update)
+    window.addEventListener('proxy:smooth-scroll', update)
     return () => {
       window.removeEventListener('scroll', update)
       window.removeEventListener('resize', update)
+      window.removeEventListener('proxy:smooth-scroll', update)
     }
   }, [pathname])
 
@@ -108,23 +112,26 @@ export default function Navbar() {
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
+    const smoother = ScrollSmoother.get()
+    smoother?.paused(open)
     return () => {
       document.body.style.overflow = ''
+      smoother?.paused(false)
     }
   }, [open])
 
   if (pathname === '/app') return null
 
   const ctaIdle = inverted
-    ? 'border-light/25 text-light hover:border-light hover:bg-light/10'
-    : 'border-ink/12 text-ink/60 hover:border-ink/25 hover:bg-ink/[0.04] hover:text-ink'
+    ? 'border-light/30 text-light hover:border-light hover:bg-light/12'
+    : 'border-ink/15 text-ink/75 hover:border-ink/30 hover:bg-ink/[0.05] hover:text-ink'
   const menuBtn = inverted
-    ? 'border-light/20 text-light'
-    : 'border-hairline text-ink'
+    ? 'border-light/25 text-light bg-light/5'
+    : 'border-ink/12 text-ink bg-ink/[0.03]'
 
   return (
     <header className={`site-nav fixed inset-x-0 top-0 z-50 ${inverted ? 'site-nav--dark' : 'site-nav--light'}`}>
-      <div className="page relative flex h-16 items-center justify-between gap-4">
+      <div className="page relative z-10 flex h-16 items-center justify-between gap-4">
         <Link to="/" className="pressable shrink-0" aria-label="PROXY home">
           <LogoMark inverted={inverted} />
         </Link>
@@ -167,8 +174,10 @@ export default function Navbar() {
       {open && (
         <div
           id="mobile-nav"
-          className={`border-t lg:hidden ${
-            inverted ? 'border-light/10 bg-graphite/90' : 'border-hairline bg-paper/90'
+          className={`relative z-10 border-t backdrop-blur-2xl lg:hidden ${
+            inverted
+              ? 'border-light/10 bg-graphite/85'
+              : 'border-ink/10 bg-paper/85'
           }`}
         >
           <nav className="page flex flex-col gap-1 py-4" aria-label="Mobile">

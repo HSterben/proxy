@@ -1,37 +1,75 @@
 import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
+import { useGSAP } from '@gsap/react'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
+import { ScrollSmoother } from 'gsap/ScrollSmoother'
 import Navbar from './Navbar'
 import Footer from './Footer'
+import {
+  prefersReducedMotion,
+  registerSmoothScrollPlugins,
+  smoothScrollTo,
+  smoothScrollTop,
+} from '../../lib/smoothScroll'
 
-function scrollToHash(hash: string) {
-  const id = hash.replace(/^#/, '')
-  if (!id) return
-  const el = document.getElementById(id)
-  if (!el) return
-  // Wait a frame so the route (and fixed nav) are painted.
-  requestAnimationFrame(() => {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  })
-}
+registerSmoothScrollPlugins()
 
 export default function Layout() {
   const { pathname, hash } = useLocation()
 
+  useGSAP(
+    () => {
+      if (prefersReducedMotion()) return
+
+      document.documentElement.classList.add('has-smooth-scroll')
+
+      const smoother = ScrollSmoother.create({
+        wrapper: '#smooth-wrapper',
+        content: '#smooth-content',
+        smooth: 0.65,
+        effects: true,
+        smoothTouch: 0.05,
+        ignoreMobileResize: true,
+        onUpdate: () => {
+          window.dispatchEvent(new Event('proxy:smooth-scroll'))
+        },
+      })
+
+      return () => {
+        document.documentElement.classList.remove('has-smooth-scroll')
+        smoother.kill()
+      }
+    },
+    { dependencies: [] },
+  )
+
   useEffect(() => {
+    // Recalc after route paint (images / outlet swap).
+    const id = requestAnimationFrame(() => ScrollTrigger.refresh())
+
     if (hash) {
-      scrollToHash(hash)
-      return
+      const t = window.setTimeout(() => smoothScrollTo(hash), 40)
+      return () => {
+        cancelAnimationFrame(id)
+        window.clearTimeout(t)
+      }
     }
-    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+
+    smoothScrollTop(true)
+    return () => cancelAnimationFrame(id)
   }, [pathname, hash])
 
   return (
     <div className="min-h-screen bg-canvas">
       <Navbar />
-      <main>
-        <Outlet />
-      </main>
-      <Footer />
+      <div id="smooth-wrapper">
+        <div id="smooth-content">
+          <main>
+            <Outlet />
+          </main>
+          <Footer />
+        </div>
+      </div>
     </div>
   )
 }

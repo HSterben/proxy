@@ -24,6 +24,12 @@
 
 @layer base {
   html {
+    scroll-padding-top: 5rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgb(11 13 15 / 0.28) transparent;
+  }
+
+  html:not(.has-smooth-scroll) {
     scroll-behavior: smooth;
   }
 
@@ -40,6 +46,31 @@
     font-optical-sizing: auto;
     font-size: 16px;
     line-height: 1.55;
+  }
+
+  /* WebKit / Blink — slim thumb that reads on paper and graphite */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: rgb(11 13 15 / 0.22);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(11 13 15 / 0.4);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   ::selection {
@@ -125,42 +156,65 @@
   }
 
   .glass-nav {
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgb(255 255 255 / 0.12);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid rgb(255 255 255 / 0.18);
   }
 
-  /* Fixed site nav — frosted glass that picks up color from content scrolling behind it */
+  /* Fixed site nav — real frosted glass (opaque enough that type stays readable) */
   .site-nav {
-    backdrop-filter: saturate(180%) blur(22px);
-    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    isolation: isolate;
+    backdrop-filter: saturate(190%) blur(28px);
+    -webkit-backdrop-filter: saturate(190%) blur(28px);
     transition:
-      background-color 280ms ease,
+      background 280ms ease,
       border-color 280ms ease,
       box-shadow 280ms ease,
       color 280ms ease;
   }
 
+  .site-nav::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.55;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+    mix-blend-mode: soft-light;
+  }
+
   .site-nav--light {
-    background: rgb(245 245 242 / 0.58);
-    border-bottom: 1px solid rgb(11 13 15 / 0.08);
-    box-shadow: 0 1px 0 rgb(255 255 255 / 0.35) inset;
+    background:
+      linear-gradient(to bottom, rgb(255 255 255 / 0.78), rgb(245 245 242 / 0.7));
+    border-bottom: 1px solid rgb(11 13 15 / 0.1);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.65) inset,
+      0 10px 40px rgb(11 13 15 / 0.06);
   }
 
   .site-nav--dark {
-    background: rgb(18 18 18 / 0.48);
-    border-bottom: 1px solid rgb(255 255 255 / 0.1);
-    box-shadow: 0 1px 0 rgb(255 255 255 / 0.06) inset;
+    background:
+      linear-gradient(to bottom, rgb(36 36 36 / 0.72), rgb(12 12 12 / 0.78));
+    border-bottom: 1px solid rgb(255 255 255 / 0.12);
+    box-shadow:
+      0 1px 0 rgb(255 255 255 / 0.08) inset,
+      0 10px 40px rgb(0 0 0 / 0.28);
   }
 
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .site-nav--light {
-      background: rgb(245 245 242 / 0.94);
+      background: rgb(245 245 242 / 0.97);
     }
 
     .site-nav--dark {
-      background: rgb(18 18 18 / 0.94);
+      background: rgb(18 18 18 / 0.97);
+    }
+
+    .site-nav::before {
+      display: none;
     }
   }
 }
