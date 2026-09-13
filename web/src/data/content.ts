@@ -148,7 +148,7 @@ export const DESKTOP_GITHUB_REPO = 'HSterben/proxy'
  * Direct download URL pattern:
  *   https://github.com/<owner>/<repo>/releases/latest/download/<filename>
  */
-export const DESKTOP_INSTALLER_FILENAME = 'PROXY-Setup-2.0.1-Windows.exe'
+export const DESKTOP_INSTALLER_FILENAME = 'PROXY-Windows-Setup.exe'
 
 /** Starts a download of the newest Windows installer from GitHub Releases. */
 export const DESKTOP_DOWNLOAD_URL =
