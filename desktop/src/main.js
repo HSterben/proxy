@@ -680,12 +680,33 @@ let settingsWindow = null;
 let presetsWindow = null;
 let subscriptionWindow = null;
 let chatWindow = null;
+/** @type {{ message: string, images: Array<{ dataUrl: string, type: string, name: string }> } | null} */
+let pendingChatStart = null;
 
-function showChatWindow(message) {
-  const payload = { message: String(message || "") };
+function normalizeChatStartPayload(input) {
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    const message = String(input.message || "");
+    const images = Array.isArray(input.images)
+      ? input.images
+          .filter((img) => img && typeof img.dataUrl === "string" && img.dataUrl.startsWith("data:"))
+          .map((img) => ({
+            dataUrl: img.dataUrl,
+            type: String(img.type || "image/png"),
+            name: String(img.name || "attachment.png"),
+          }))
+      : [];
+    return { message, images };
+  }
+  return { message: String(input || ""), images: [] };
+}
+
+function showChatWindow(input) {
+  const payload = normalizeChatStartPayload(input);
+  pendingChatStart = payload;
 
   if (chatWindow && !chatWindow.isDestroyed()) {
     chatWindow.webContents.send("chat-start", payload);
+    pendingChatStart = null;
     if (!chatWindow.isVisible()) {
       chatWindow.setOpacity(0);
       chatWindow.show();
@@ -731,7 +752,8 @@ function showChatWindow(message) {
     chatWindow = null;
   });
 
-  const encodedMessage = encodeURIComponent(JSON.stringify(payload));
+  // Keep images out of the URL (base64 blows past length limits). ChatView
+  // claims pendingChatStart via get-pending-chat-start on mount.
   const onReady = () => {
     chatWindow.show();
     chatWindow.focus();
@@ -740,13 +762,13 @@ function showChatWindow(message) {
   if (MESSAGE_WINDOW_VITE_DEV_SERVER_URL || MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     const devServerUrl =
       MESSAGE_WINDOW_VITE_DEV_SERVER_URL || MAIN_WINDOW_VITE_DEV_SERVER_URL;
-    chatWindow.loadURL(`${devServerUrl}/chat.html?data=${encodedMessage}`);
+    chatWindow.loadURL(`${devServerUrl}/chat.html`);
   } else {
     const filePath = path.join(
       __dirname,
       `../renderer/${MESSAGE_WINDOW_VITE_NAME}/chat.html`
     );
-    chatWindow.loadFile(filePath, { query: { data: encodedMessage } });
+    chatWindow.loadFile(filePath);
   }
 
   chatWindow.once("ready-to-show", onReady);
@@ -1211,6 +1233,12 @@ ipcMain.handle("send-message", async (event, message) => {
 
   showChatWindow(message);
   return { success: true };
+});
+
+ipcMain.handle("get-pending-chat-start", async () => {
+  const payload = pendingChatStart;
+  pendingChatStart = null;
+  return payload;
 });
 
 ipcMain.handle("hide-window", async () => {

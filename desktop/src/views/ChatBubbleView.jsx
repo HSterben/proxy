@@ -23,6 +23,15 @@ function BubbleControls() {
   );
 }
 
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 const ChatBubbleView = () => {
   const [message, setMessage] = useState('');
   const [attachedFiles, setAttachedFiles] = useState([]);
@@ -30,6 +39,7 @@ const ChatBubbleView = () => {
   const [activePreset, setActivePreset] = useState('');
   const [stateMenuOpen, setStateMenuOpen] = useState(false);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     api?.readPresets?.().then((result) => {
@@ -56,38 +66,53 @@ const ChatBubbleView = () => {
     const handlePaste = async (e) => {
       const items = e.clipboardData?.items;
       if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.type.indexOf('image') !== -1) {
-          e.preventDefault();
-          const file = item.getAsFile();
-          if (!file) continue;
-          try {
-            const reader = new FileReader();
-            const dataUrl = await new Promise((resolve, reject) => {
-              reader.onload = () => resolve(reader.result);
-              reader.onerror = reject;
-              reader.readAsDataURL(file);
-            });
-            setAttachedFiles((prev) => [
-              ...prev,
-              {
-                file,
-                dataUrl,
-                type: file.type,
-                name: `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
-              },
-            ]);
-          } catch (error) {
-            console.error('Error pasting image:', error);
-          }
-          break;
+      const imageItems = Array.from(items).filter((item) => item.type.startsWith('image/'));
+      if (imageItems.length === 0) return;
+      e.preventDefault();
+      for (const item of imageItems) {
+        const file = item.getAsFile();
+        if (!file) continue;
+        try {
+          const dataUrl = await fileToDataUrl(file);
+          setAttachedFiles((prev) => [
+            ...prev,
+            {
+              dataUrl,
+              type: file.type,
+              name: `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
+            },
+          ]);
+        } catch (error) {
+          console.error('Error pasting image:', error);
         }
       }
     };
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
   }, []);
+
+  const handleFileSelect = async (e) => {
+    const files = Array.from(e.target.files || []).filter(
+      (file) => file.type.startsWith('image/') || file.type === 'application/pdf',
+    );
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (files.length === 0) return;
+
+    const next = [];
+    for (const file of files) {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        next.push({
+          dataUrl,
+          type: file.type.startsWith('image/') ? file.type : 'image/png',
+          name: file.name,
+        });
+      } catch (err) {
+        console.error('Error reading file:', err);
+      }
+    }
+    if (next.length) setAttachedFiles((prev) => [...prev, ...next]);
+  };
 
   const presetNames = Object.keys(presets).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   const stateLabel = activePreset || 'Quick';
@@ -101,16 +126,11 @@ const ChatBubbleView = () => {
     setMessage('');
     setAttachedFiles([]);
 
-    let payload = messageText;
+    let text = messageText;
     if (activePreset && messageText) {
-      payload = `${activePreset} ${messageText}`;
+      text = `${activePreset} ${messageText}`;
     } else if (activePreset && !messageText) {
-      payload = activePreset;
-    }
-
-    if (filesToSend.length > 0) {
-      const imageNote = `[${filesToSend.length} image(s) attached]`;
-      payload = payload ? `${payload} ${imageNote}` : imageNote;
+      text = activePreset;
     }
 
     if (!api?.sendMessage) {
@@ -119,7 +139,10 @@ const ChatBubbleView = () => {
     }
 
     try {
-      await api.sendMessage(payload);
+      await api.sendMessage({
+        message: text,
+        images: filesToSend.map(({ dataUrl, type, name }) => ({ dataUrl, type, name })),
+      });
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -146,6 +169,24 @@ const ChatBubbleView = () => {
       </header>
 
       <form className="bubble-input-box" onSubmit={handleSubmit}>
+        {attachedFiles.length > 0 && (
+          <div className="bubble-attachments">
+            {attachedFiles.map((file, idx) => (
+              <div key={`${file.name}-${idx}`} className="bubble-attachment-item">
+                <img src={file.dataUrl} alt={file.name} className="bubble-attachment-thumb" />
+                <button
+                  type="button"
+                  className="bubble-attachment-remove"
+                  aria-label="Remove attachment"
+                  onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           className="bubble-textarea"
@@ -196,6 +237,27 @@ const ChatBubbleView = () => {
               </div>
             )}
           </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="bubble-file-input"
+            accept="image/*,application/pdf"
+            multiple
+            onChange={handleFileSelect}
+            aria-label="Attach file"
+          />
+          <button
+            type="button"
+            className="bubble-attach"
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach file"
+            title="Attach image or PDF"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
 
           {attachedFiles.length > 0 && (
             <span className="bubble-attach-badge">+{attachedFiles.length}</span>
