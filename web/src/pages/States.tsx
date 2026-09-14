@@ -857,6 +857,10 @@ export default function States() {
                   user && myWorkosId && post.authorWorkosId === myWorkosId && !post.isOfficial,
                 )
                 const saved = isSaved(post)
+                const freeIncluded =
+                  Boolean(post.isOfficial) &&
+                  !canPublishStates &&
+                  defaultNames.includes(post.name)
                 const tags = post.tags || []
 
                 return (
@@ -882,11 +886,15 @@ export default function States() {
                                 Official
                               </span>
                             )}
-                            {saved && (
+                            {freeIncluded ? (
+                              <span className="rounded-md border border-hairline px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/55">
+                                Included
+                              </span>
+                            ) : saved ? (
                               <span className="rounded-md border border-hairline px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/55">
                                 Saved
                               </span>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                         <button
@@ -939,7 +947,18 @@ export default function States() {
                         </pre>
                       )}
                       <div className="mt-auto flex flex-wrap items-center gap-3 pt-5">
-                        {saved ? (
+                        {freeIncluded ? (
+                          <span className="inline-flex min-h-10 items-center rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/55">
+                            Included on free
+                          </span>
+                        ) : post.isOfficial && !canPublishStates ? (
+                          <Link
+                            to="/account/billing"
+                            className="pressable inline-flex min-h-10 items-center gap-2 rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/75"
+                          >
+                            Subscribe to unlock
+                          </Link>
+                        ) : saved ? (
                           <button
                             type="button"
                             disabled={busyId === `lib-${post._id}`}

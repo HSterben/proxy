@@ -56,9 +56,9 @@ export const pricingPlans = [
     name: 'Free',
     price: '$0',
     period: '',
-    description: 'Sign in and chat with a lifetime token pool and three built-in states.',
+    description: 'Sign in and try PROXY with a small lifetime chat allowance and three built-in states.',
     features: [
-      '30,000 weighted tokens (lifetime, no monthly reset)',
+      'Up to about 30 requests (lifetime)',
       'Three states: Simplify, List, and Critique',
       'Windows app and PROXY Web chat',
       'Browse the states gallery',
@@ -75,7 +75,7 @@ export const pricingPlans = [
     period: '/month',
     description: 'Full chat quota plus custom states you can publish.',
     features: [
-      'Monthly weighted-token quota',
+      'Monthly chat allowance',
       'Create and publish custom states',
       'States sync across web and Windows',
       'Billing and invoices on this site',
@@ -112,6 +112,11 @@ export const faqs = [
       'A state is a named chat setup: trigger word, instructions, and optional model settings. In chat, put the trigger first, such as Simplify draft this email.',
   },
   {
+    question: 'What differentiates PROXY from other AI chatbots?',
+    answer:
+      'Usefulness. PROXY is built around states—reusable setups you trigger by name—so every reply can follow the instructions you care about instead of a one-size-fits-all chat. Accessibility means the same account works on a lightweight Windows app and in the browser. Customizability means you can start with official states, save gallery ones, or (on Pro) write and publish your own so the product bends to how you actually work.',
+  },
+  {
     question: 'Where can I use PROXY?',
     answer:
       'On the Windows desktop app and in PROXY Web. Sign in with the same PROXY account on both.',
@@ -124,7 +129,7 @@ export const faqs = [
   {
     question: 'Do I need a paid plan to chat?',
     answer:
-      'No. Free accounts can chat with 30,000 lifetime weighted tokens and three states (Simplify, List, Critique). Subscribe when you need more tokens or want to create and publish your own states.',
+      'No. Free accounts get up to about 30 requests (lifetime) and three states (Simplify, List, Critique). Subscribe when you need more chat capacity or want to create and publish your own states.',
   },
   {
     question: 'Where do I change my plan or payment method?',

@@ -7,9 +7,9 @@ export default function Pricing() {
   const [free, pro, yearly] = pricingPlans
 
   return (
-    <section id="pricing" className="bg-canvas py-16 text-ink md:py-20">
+    <section id="pricing" className="bg-canvas py-20 text-ink md:py-24">
       <div className="page">
-        <Reveal className="mb-8 max-w-xl">
+        <Reveal className="mb-10 max-w-xl">
           <p className="eyebrow">Pricing</p>
           <h2 className="display mt-3 font-semibold">Plans for web and Windows chat</h2>
         </Reveal>
@@ -18,10 +18,10 @@ export default function Pricing() {
           <Reveal>
             <PlanCard plan={free} />
           </Reveal>
-          <Reveal delay={60}>
+          <Reveal delay={50}>
             <PlanCard plan={pro} featured />
           </Reveal>
-          <Reveal delay={100}>
+          <Reveal delay={90}>
             <PlanCard plan={yearly} />
           </Reveal>
         </div>
@@ -39,29 +39,31 @@ function PlanCard({
 }) {
   return (
     <div
-      className={`flex h-full flex-col rounded-[10px] p-7 md:p-8 ${
-        featured ? 'card-dark' : 'card'
+      className={`flex h-full flex-col rounded-[16px] p-7 md:p-8 ${
+        featured
+          ? 'card-dark ring-1 ring-white/10'
+          : 'card'
       }`}
     >
       {plan.badge && (
         <span
-          className={`mb-4 w-fit rounded-[6px] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.14em] ${
+          className={`mb-4 w-fit rounded-[8px] px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.14em] ${
             featured ? 'bg-signal text-white' : 'bg-brand-surface text-ink'
           }`}
         >
           {plan.badge}
         </span>
       )}
-      <h3 className="text-xl font-semibold md:text-[22px]">{plan.name}</h3>
+      <h3 className="text-xl font-semibold tracking-[-0.02em] md:text-[22px]">{plan.name}</h3>
       <div className="mt-2 flex items-baseline gap-1">
-        <span className="display text-[2rem] font-semibold leading-none">{plan.price}</span>
+        <span className="display text-[2rem] font-semibold leading-none tracking-[-0.03em]">{plan.price}</span>
         {plan.period && (
-          <span className={`text-base ${featured ? 'text-white/50' : 'text-ink/45'}`}>
+          <span className={`text-base ${featured ? 'text-white/48' : 'text-ink/42'}`}>
             {plan.period}
           </span>
         )}
       </div>
-      <p className={`mt-3 text-base leading-relaxed ${featured ? 'text-white/60' : 'text-ink/55'}`}>
+      <p className={`mt-3 text-base leading-relaxed ${featured ? 'text-white/58' : 'text-ink/55'}`}>
         {plan.description}
       </p>
       <div className="mt-6">
@@ -78,7 +80,7 @@ function PlanCard({
           <li
             key={feature}
             className={`flex items-start gap-3 text-base ${
-              featured ? 'text-white/80' : 'text-ink/60'
+              featured ? 'text-white/78' : 'text-ink/58'
             }`}
           >
             <Check className={`mt-1 h-4 w-4 shrink-0 ${featured ? 'text-signal' : 'text-ink'}`} strokeWidth={1.5} />

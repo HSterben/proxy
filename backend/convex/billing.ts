@@ -6,6 +6,7 @@ import {
   isSubscriptionActive,
   quotaForPlan,
 } from './plans';
+import { syncOfficialLibraryForPlan } from './states';
 
 /**
  * After Stripe webhooks update subscription status, sync plan + quota on the user.
@@ -51,6 +52,7 @@ export const syncEntitlements = internalMutation({
         outputTokensUsed: 0,
         updatedAt: now,
       });
+      await syncOfficialLibraryForPlan(ctx, args.workosId, active);
       return null;
     }
 
@@ -63,6 +65,8 @@ export const syncEntitlements = internalMutation({
         outputTokensUsed: 0,
         updatedAt: now,
       });
+      // Paid unlock: add every official PROXY default to their library.
+      await syncOfficialLibraryForPlan(ctx, args.workosId, true);
       return null;
     }
 
@@ -70,6 +74,8 @@ export const syncEntitlements = internalMutation({
       weightedTokenLimit: FREE_WEIGHTED_TOKEN_LIMIT,
       updatedAt: now,
     });
+    // Lapse: keep custom saves, drop paid-only official defaults.
+    await syncOfficialLibraryForPlan(ctx, args.workosId, false);
 
     return null;
   },

@@ -129,6 +129,55 @@ async function officialIdByKey(
   return map;
 }
 
+/** Official IDs a user should have in-library for their plan. */
+async function officialSeedIdsForPlan(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  subscribed: boolean,
+): Promise<Id<'states'>[]> {
+  const official = await officialIdByKey(ctx);
+  if (subscribed) return [...official.values()];
+  return FREE_STATE_NAMES.map((n) => official.get(n)).filter(Boolean) as Id<'states'>[];
+}
+
+/**
+ * Keep free libraries limited to the three free official states, and grant every
+ * official PROXY default when subscribed.
+ */
+export async function syncOfficialLibraryForPlan(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  workosId: string,
+  subscribed: boolean,
+): Promise<Id<'states'>[]> {
+  const current = await listLibraryStateIds(ctx, workosId);
+  const official = await officialIdByKey(ctx);
+  const officialIds = new Set(official.values());
+  const required = await officialSeedIdsForPlan(ctx, subscribed);
+  const requiredSet = new Set(required);
+
+  const kept: Id<'states'>[] = [];
+  for (const id of current) {
+    if (!officialIds.has(id)) {
+      kept.push(id);
+      continue;
+    }
+    if (requiredSet.has(id)) kept.push(id);
+    // Drop official states not included in this plan (fixes free users with all presets marked saved).
+  }
+
+  for (const id of required) {
+    if (!kept.includes(id)) kept.push(id);
+  }
+
+  const changed =
+    kept.length !== current.length || kept.some((id, i) => id !== current[i]);
+  if (changed) {
+    await replaceLibraryStateIds(ctx, workosId, kept);
+  }
+  return kept;
+}
+
 /** Ordered state IDs in the user's library (M:N rows only). */
 export async function listLibraryStateIds(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -379,7 +428,7 @@ async function reconcileLibraryIds(
 }
 
 /**
- * Ensure M:N library exists. Empty libraries get official defaults.
+ * Ensure M:N library exists. Empty libraries get plan-appropriate official defaults.
  */
 export async function resolveLibraryIds(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -389,16 +438,17 @@ export async function resolveLibraryIds(
 ): Promise<Id<'states'>[]> {
   await migrateLegacyUserStates(ctx, workosId, displayName);
 
+  const subscribed = await userHasActiveSubscription(ctx, workosId);
   const membershipIds = await listLibraryStateIds(ctx, workosId);
-  if (membershipIds.length > 0) {
-    return await reconcileLibraryIds(ctx, workosId, membershipIds);
+  if (membershipIds.length === 0) {
+    const seed = await officialSeedIdsForPlan(ctx, subscribed);
+    if (seed.length === 0) return [];
+    await replaceLibraryStateIds(ctx, workosId, seed);
+    return await reconcileLibraryIds(ctx, workosId, seed);
   }
 
-  const official = await officialIdByKey(ctx);
-  const libraryIds = [...official.values()];
-  if (libraryIds.length === 0) return [];
-  await replaceLibraryStateIds(ctx, workosId, libraryIds);
-  return await reconcileLibraryIds(ctx, workosId, libraryIds);
+  const synced = await syncOfficialLibraryForPlan(ctx, workosId, subscribed);
+  return await reconcileLibraryIds(ctx, workosId, synced);
 }
 
 const libraryItemValidator = v.object({
@@ -431,10 +481,9 @@ export const getMyStates = query({
     let libraryIds = await listLibraryStateIds(ctx, workosId);
 
     if (libraryIds.length === 0) {
-      const official = await officialIdByKey(ctx);
-      libraryIds = subscribed
-        ? [...official.values()]
-        : FREE_STATE_NAMES.map((n) => official.get(n)).filter(Boolean) as Id<'states'>[];
+      libraryIds = await officialSeedIdsForPlan(ctx, subscribed);
+    } else {
+      libraryIds = await syncOfficialLibraryForPlan(ctx, workosId, subscribed);
     }
 
     const states: Record<string, StateValue> = {};
@@ -764,6 +813,18 @@ export const removeMyState = mutation({
     if (!targetId) throw new Error('State not found in your library');
 
     const doc = await ctx.db.get(targetId);
+    const subscribed = await userHasActiveSubscription(ctx, workosId);
+    if (
+      !subscribed &&
+      doc &&
+      (doc.isOfficial || Boolean(doc.officialKey)) &&
+      isFreeStateName(doc.name)
+    ) {
+      throw new Error(
+        'Simplify, List, and Critique stay on free accounts. Subscribe for more states.',
+      );
+    }
+
     libraryIds = libraryIds.filter((id) => id !== targetId);
 
     if (

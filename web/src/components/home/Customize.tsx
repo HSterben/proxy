@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
 import Reveal from '../ui/Reveal'
 import ProductPreview, { type LengthMode, type StyleMode, type ToneMode } from '../ui/ProductPreview'
 
@@ -7,16 +8,22 @@ function Segment<T extends string>({
   value,
   options,
   onChange,
+  layoutGroup,
 }: {
   label: string
   value: T
   options: { id: T; label: string }[]
   onChange: (v: T) => void
+  layoutGroup: string
 }) {
+  const reduce = useReducedMotion()
+
   return (
     <fieldset>
-      <legend className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-white/50">{label}</legend>
-      <div className="flex rounded-[10px] border border-white/12 p-1">
+      <legend className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.16em] text-white/48">
+        {label}
+      </legend>
+      <div className="segment-track flex">
         {options.map((opt) => {
           const selected = value === opt.id
           return (
@@ -25,11 +32,17 @@ function Segment<T extends string>({
               type="button"
               aria-pressed={selected}
               onClick={() => onChange(opt.id)}
-              className={`min-h-11 flex-1 rounded-[8px] px-3 text-sm font-medium transition-colors duration-200 ${
-                selected ? 'bg-white text-black' : 'text-white/55 hover:text-white'
-              }`}
+              className="segment-item pressable relative z-[1]"
             >
-              {opt.label}
+              {selected && !reduce && (
+                <motion.span
+                  layoutId={`segment-thumb-${layoutGroup}`}
+                  className="segment-thumb"
+                  transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
+                />
+              )}
+              {selected && reduce && <span className="segment-thumb" />}
+              <span className="relative z-[1]">{opt.label}</span>
             </button>
           )
         })}
@@ -44,19 +57,20 @@ export default function Customize() {
   const [style, setStyle] = useState<StyleMode>('precise')
 
   return (
-    <section id="customize" data-nav-tone="dark" className="bg-graphite py-16 text-white md:py-20">
-      <div className="page grid items-start gap-10 lg:grid-cols-2 lg:gap-14">
+    <section id="customize" data-nav-tone="dark" className="bg-graphite py-20 text-white md:py-24">
+      <div className="page grid items-start gap-12 lg:grid-cols-2 lg:gap-16">
         <Reveal>
           <p className="eyebrow-dark">States</p>
           <h2 className="display mt-3 font-semibold">Preview length, tone, and style.</h2>
-          <p className="mt-4 max-w-[42ch] text-lg leading-relaxed text-white/55">
+          <p className="mt-4 max-w-[42ch] text-lg leading-relaxed text-white/52">
             These controls mirror the kinds of preferences you can bake into a PROXY state. Switch
             them and watch the sample reply change.
           </p>
 
-          <div className="mt-8 grid gap-5">
+          <div className="mt-9 grid gap-5">
             <Segment
               label="Length"
+              layoutGroup="length"
               value={length}
               onChange={setLength}
               options={[
@@ -66,6 +80,7 @@ export default function Customize() {
             />
             <Segment
               label="Tone"
+              layoutGroup="tone"
               value={tone}
               onChange={setTone}
               options={[
@@ -75,6 +90,7 @@ export default function Customize() {
             />
             <Segment
               label="Style"
+              layoutGroup="style"
               value={style}
               onChange={setStyle}
               options={[

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowUpRight, Menu, X } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ScrollSmoother } from 'gsap/ScrollSmoother'
 import { DESKTOP_DOWNLOAD_URL, navLinks } from '../../data/content'
 import { smoothScrollTo } from '../../lib/smoothScroll'
@@ -11,7 +12,7 @@ function LogoMark({ inverted = false }: { inverted?: boolean }) {
   return (
     <span className={`flex items-center gap-2.5 ${inverted ? 'text-light' : 'text-ink'}`} aria-hidden="true">
       <BrandMark className="h-7 w-7" inverted={inverted} />
-      <span className="text-base font-semibold tracking-tight">PROXY</span>
+      <span className="text-[17px] font-semibold tracking-[-0.02em]">PROXY</span>
     </span>
   )
 }
@@ -103,11 +104,24 @@ function useNavTone(): 'light' | 'dark' {
 export default function Navbar() {
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
   const tone = useNavTone()
   const inverted = tone === 'dark'
+  const reduce = useReducedMotion()
 
   useEffect(() => {
     setOpen(false)
+  }, [pathname])
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('proxy:smooth-scroll', onScroll)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('proxy:smooth-scroll', onScroll)
+    }
   }, [pathname])
 
   useEffect(() => {
@@ -123,14 +137,18 @@ export default function Navbar() {
   if (pathname === '/app') return null
 
   const ctaIdle = inverted
-    ? 'border-light/30 text-light hover:border-light hover:bg-light/12'
-    : 'border-ink/15 text-ink/75 hover:border-ink/30 hover:bg-ink/[0.05] hover:text-ink'
+    ? 'border-light/28 text-light hover:border-light/70 hover:bg-light/[0.1]'
+    : 'border-ink/12 text-ink/75 hover:border-ink/28 hover:bg-ink/[0.04] hover:text-ink'
   const menuBtn = inverted
-    ? 'border-light/25 text-light bg-light/5'
-    : 'border-ink/12 text-ink bg-ink/[0.03]'
+    ? 'border-light/22 text-light bg-light/[0.06]'
+    : 'border-ink/10 text-ink bg-ink/[0.03]'
 
   return (
-    <header className={`site-nav fixed inset-x-0 top-0 z-50 ${inverted ? 'site-nav--dark' : 'site-nav--light'}`}>
+    <header
+      className={`site-nav fixed inset-x-0 top-0 z-50 ${inverted ? 'site-nav--dark' : 'site-nav--light'} ${
+        scrolled ? 'site-nav--scrolled' : ''
+      }`}
+    >
       <div className="page relative z-10 flex h-16 items-center justify-between gap-4">
         <Link to="/" className="pressable shrink-0" aria-label="PROXY home">
           <LogoMark inverted={inverted} />
@@ -145,14 +163,14 @@ export default function Navbar() {
             href={DESKTOP_DOWNLOAD_URL}
             target="_blank"
             rel="noreferrer"
-            className={`pressable inline-flex min-h-10 items-center gap-1.5 rounded-full border px-4 text-[15px] font-medium transition-colors duration-200 ${ctaIdle}`}
+            className={`pressable inline-flex min-h-10 items-center gap-1.5 rounded-full border px-4 text-[15px] font-medium tracking-[-0.01em] ${ctaIdle}`}
           >
             Download for Windows
             <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={1.5} />
           </a>
           <Link
             to="/app"
-            className={`pressable inline-flex min-h-10 items-center rounded-full border px-4 text-[15px] font-medium transition-colors duration-200 ${ctaIdle}`}
+            className={`pressable inline-flex min-h-10 items-center rounded-full border px-4 text-[15px] font-medium tracking-[-0.01em] ${ctaIdle}`}
           >
             Open PROXY Web
           </Link>
@@ -171,47 +189,52 @@ export default function Navbar() {
         </button>
       </div>
 
-      {open && (
-        <div
-          id="mobile-nav"
-          className={`relative z-10 border-t backdrop-blur-2xl lg:hidden ${
-            inverted
-              ? 'border-light/10 bg-graphite/85'
-              : 'border-ink/10 bg-paper/85'
-          }`}
-        >
-          <nav className="page flex flex-col gap-1 py-4" aria-label="Mobile">
-            <div
-              className={`flex flex-col gap-1 [&_a]:flex [&_a]:min-h-11 [&_a]:items-center [&_a]:text-base ${
-                inverted ? '[&_a]:text-light' : '[&_a]:text-ink'
-              }`}
-            >
-              <NavItems inverted={inverted} onNavigate={() => setOpen(false)} />
-            </div>
-            <Link
-              to="/app"
-              className={`mt-2 flex min-h-11 items-center justify-center rounded-[10px] border text-base ${
-                inverted ? 'border-light/20 text-light' : 'border-hairline text-ink'
-              }`}
-            >
-              Open PROXY Web
-            </Link>
-            <a
-              href={DESKTOP_DOWNLOAD_URL}
-              target="_blank"
-              rel="noreferrer"
-              className={`flex min-h-11 items-center justify-center rounded-[10px] border text-base ${
-                inverted ? 'border-light/20 text-light' : 'border-hairline text-ink'
-              }`}
-            >
-              Download for Windows
-            </a>
-            <div className="mt-3 px-1">
-              <AccountMenu variant={inverted ? 'dark' : 'light'} />
-            </div>
-          </nav>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            id="mobile-nav"
+            key="mobile-nav"
+            initial={reduce ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6 }}
+            transition={reduce ? { duration: 0.15 } : { type: 'spring', bounce: 0, duration: 0.35 }}
+            className={`relative z-10 border-t backdrop-blur-2xl lg:hidden ${
+              inverted ? 'border-light/10 bg-graphite/88' : 'border-ink/8 bg-paper/88'
+            }`}
+          >
+            <nav className="page flex flex-col gap-1 py-4" aria-label="Mobile">
+              <div
+                className={`flex flex-col gap-1 [&_a]:flex [&_a]:min-h-11 [&_a]:items-center [&_a]:text-base ${
+                  inverted ? '[&_a]:text-light' : '[&_a]:text-ink'
+                }`}
+              >
+                <NavItems inverted={inverted} onNavigate={() => setOpen(false)} />
+              </div>
+              <Link
+                to="/app"
+                className={`pressable mt-2 flex min-h-11 items-center justify-center rounded-[12px] border text-base ${
+                  inverted ? 'border-light/18 text-light' : 'border-hairline text-ink'
+                }`}
+              >
+                Open PROXY Web
+              </Link>
+              <a
+                href={DESKTOP_DOWNLOAD_URL}
+                target="_blank"
+                rel="noreferrer"
+                className={`pressable flex min-h-11 items-center justify-center rounded-[12px] border text-base ${
+                  inverted ? 'border-light/18 text-light' : 'border-hairline text-ink'
+                }`}
+              >
+                Download for Windows
+              </a>
+              <div className="mt-3 px-1">
+                <AccountMenu variant={inverted ? 'dark' : 'light'} />
+              </div>
+            </nav>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </header>
   )
 }

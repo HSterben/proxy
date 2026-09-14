@@ -5,38 +5,47 @@ import { DESKTOP_DOWNLOAD_URL } from '../../data/content'
 import { productImages } from '../../data/productImages'
 import { smoothScrollTo } from '../../lib/smoothScroll'
 
+const springEnter = { type: 'spring' as const, bounce: 0, duration: 0.4 }
+
 export default function Hero() {
   const reduce = useReducedMotion()
   const enter = (delay: number) =>
     reduce
       ? { initial: false as const, animate: { opacity: 1 }, transition: { duration: 0.2 } }
       : {
-          initial: { opacity: 0, y: 16 },
+          initial: { opacity: 0, y: 18 },
           animate: { opacity: 1, y: 0 },
-          transition: { duration: 0.22, delay },
+          transition: { ...springEnter, delay },
         }
 
   return (
     <section
       data-nav-tone="dark"
-      className="relative min-h-screen bg-[#0b0d0f] px-3 pb-4 pt-20 text-light md:min-h-[100dvh] md:px-4 md:pb-5 md:pt-24"
- 
+      className="relative min-h-screen overflow-hidden bg-[#0b0d0f] px-3 pb-4 pt-20 text-light md:min-h-[100dvh] md:px-4 md:pb-5 md:pt-24"
     >
-      <div className="mx-auto flex h-full max-w-[1400px] flex-col">
+      {/* Atmospheric depth behind the bento */}
+
+      <div className="relative mx-auto flex h-full max-w-[1400px] flex-col">
         <div className="grid flex-1 grid-cols-6 gap-2 md:grid-cols-12 md:grid-rows-[minmax(280px,34vh)_minmax(140px,auto)_minmax(120px,auto)] md:gap-3">
           <motion.div
-            className="hero-radius col-span-6 flex min-h-[220px] items-end bg-paper p-7 text-ink md:col-span-5 md:col-start-1 md:row-start-1 md:min-h-0 md:p-10 lg:p-12"
+            className="hero-radius hero-material col-span-6 flex min-h-[220px] flex-col justify-end bg-paper p-7 text-ink md:col-span-5 md:col-start-1 md:row-start-1 md:min-h-0 md:p-10 lg:p-12"
             {...enter(0)}
           >
-            <h1 className="text-[1.65rem] font-semibold leading-[1.12] tracking-tight sm:text-3xl md:text-[2rem] lg:text-[2.45rem]">
-              PROXY for Windows and the web.
+            <p className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-ink/40">
+              PROXY
+            </p>
+            <h1 className="text-[1.7rem] font-semibold leading-[1.08] tracking-[-0.03em] sm:text-3xl md:text-[2.05rem] lg:text-[2.55rem]">
+              Chat with states
               <br />
-              Chat with states you control.
+              you control.
             </h1>
+            <p className="mt-4 max-w-[28ch] text-[15px] leading-snug text-muted-dark md:text-base">
+              Windows and the web. One account. Named triggers that shape every reply.
+            </p>
           </motion.div>
 
           <motion.div
-            className="hero-radius col-span-3 hidden aspect-square bg-paper text-ink md:col-span-2 md:col-start-11 md:row-start-1 md:flex"
+            className="hero-radius hero-material col-span-3 hidden aspect-square bg-paper text-ink md:col-span-2 md:col-start-11 md:row-start-1 md:flex"
             {...enter(0.05)}
           >
             <a
@@ -47,12 +56,12 @@ export default function Hero() {
               aria-label="Download Windows app"
             >
               <ArrowUpRight
-                className="h-7 w-7 self-end transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                className="h-7 w-7 self-end transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
                 strokeWidth={1.4}
               />
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-ink/45">Windows</p>
-                <p className="mt-2 text-[1.35rem] font-semibold leading-tight tracking-tight lg:text-[1.5rem]">
+                <p className="mt-2 text-[1.35rem] font-semibold leading-tight tracking-[-0.025em] lg:text-[1.5rem]">
                   Download
                   <br />
                   the app
@@ -77,17 +86,17 @@ export default function Hero() {
             {...enter(0.12)}
           >
             <Sparkles className="h-5 w-5 text-ink/35" strokeWidth={1.5} />
-            <p className="text-[15px] leading-snug">
-              <span className="font-semibold">Install:</span>{' '}
+            <p className="text-[15px] leading-snug tracking-[-0.01em]">
+              <span className="font-semibold">States:</span>{' '}
               <span className="text-muted-dark">
-                Get the Windows build from GitHub Releases, or open chat in the browser.
+                Name a trigger, set the instructions, reuse it every time you chat.
               </span>
             </p>
           </motion.div>
 
           <motion.div
             className="col-span-6 flex flex-col justify-between gap-6 px-1 md:col-span-5 md:col-start-1 md:row-span-2 md:row-start-2 md:px-2"
-            {...enter(0.06)}
+            {...enter(0.04)}
           >
             <div>
               <a
@@ -103,7 +112,7 @@ export default function Hero() {
               </a>
             </div>
 
-            <div className="relative overflow-hidden rounded-[1.25rem] border border-border-dark bg-surface-dark shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
+            <div className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.08] bg-surface-dark shadow-[0_24px_60px_rgba(0,0,0,0.4),0_1px_0_rgba(255,255,255,0.06)_inset]">
               <img
                 src={productImages.chat}
                 alt="PROXY chat with the Simplify state"
@@ -115,16 +124,16 @@ export default function Hero() {
             </div>
           </motion.div>
 
-          <motion.div className="col-span-6 flex gap-2 md:hidden" {...enter(0.22)}>
+          <motion.div className="col-span-6 flex gap-2 md:hidden" {...enter(0.14)}>
             <a
               href={DESKTOP_DOWNLOAD_URL}
               target="_blank"
               rel="noreferrer"
-              className="pressable hero-radius flex min-h-11 flex-1 flex-col justify-between bg-paper p-5 text-ink"
+              className="pressable hero-radius hero-material flex min-h-11 flex-1 flex-col justify-between bg-paper p-5 text-ink"
               aria-label="Download Windows app"
             >
               <ArrowUpRight className="h-5 w-5 self-end" strokeWidth={1.5} />
-              <span className="text-[15px] font-semibold leading-snug">
+              <span className="text-[15px] font-semibold leading-snug tracking-[-0.02em]">
                 Download
                 <br />
                 the app
@@ -134,7 +143,7 @@ export default function Hero() {
               href={DESKTOP_DOWNLOAD_URL}
               target="_blank"
               rel="noreferrer"
-              className="pressable hero-radius flex min-h-11 flex-[2] items-center justify-center gap-2 bg-paper p-5 text-[15px] font-semibold text-ink"
+              className="pressable hero-radius hero-material flex min-h-11 flex-[2] items-center justify-center gap-2 bg-paper p-5 text-[15px] font-semibold tracking-[-0.015em] text-ink"
             >
               Download for Windows
               <ArrowUpRight className="h-4 w-4" />

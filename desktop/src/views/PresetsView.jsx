@@ -479,7 +479,11 @@ export default function PresetsView() {
   };
 
   const removeEntry = (index) => {
-    setEntries((prev) => prev.filter((_, i) => i !== index));
+    setEntries((prev) => {
+      const target = prev[index];
+      if (target?.isOfficial) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const addEntry = () => {
@@ -685,13 +689,15 @@ export default function PresetsView() {
                   spellCheck={false}
                   aria-label="Trigger word"
                 />
-                <button
-                  type="button"
-                  className="btn-danger btn-sm preset-remove"
-                  onClick={() => removeEntry(index)}
-                >
-                  Remove
-                </button>
+                {!entry.isOfficial && (
+                  <button
+                    type="button"
+                    className="btn-danger btn-sm preset-remove"
+                    onClick={() => removeEntry(index)}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
 
               <input

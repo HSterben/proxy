@@ -739,8 +739,8 @@ export default function Account() {
             <>
               <p className="mt-2 text-[14px] text-ink/55">
                 {account.subscriptionActive
-                  ? 'Monthly weighted-token allowance on your paid plan.'
-                  : '30,000 weighted tokens total on the free plan (no monthly reset). Subscribe for more.'}
+                  ? 'Monthly chat allowance on your paid plan.'
+                  : 'Free plan includes a lifetime chat allowance and three states. Subscribe for more.'}
               </p>
               <dl className="mt-5 space-y-3 text-[15px]">
                 <div className="flex justify-between gap-4 border-b border-hairline pb-3">

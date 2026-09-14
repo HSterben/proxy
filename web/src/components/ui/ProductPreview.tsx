@@ -64,7 +64,7 @@ export default function ProductPreview({
 
   return (
     <div
-      className={`relative flex min-h-[420px] overflow-hidden rounded-[12px] border border-white/10 bg-[#0e1116] shadow-[0_24px_60px_rgb(0_0_0_/_0.45)] md:min-h-[480px] ${className}`}
+      className={`relative flex min-h-[420px] overflow-hidden rounded-[16px] border border-white/[0.08] bg-[#0e1116] shadow-[0_28px_70px_rgb(0_0_0_/_0.5),0_1px_0_rgb(255_255_255_/_0.06)_inset] md:min-h-[480px] ${className}`}
     >
       {/* App rail */}
       <aside className="flex w-12 shrink-0 flex-col items-center border-r border-white/8 bg-[#0a0c10] py-3 md:w-14">

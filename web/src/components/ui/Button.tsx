@@ -14,17 +14,17 @@ type ButtonProps = {
 
 const variants = {
   primary:
-    'min-h-11 rounded-[10px] bg-black px-6 py-3 text-base font-semibold text-white transition-colors duration-200 hover:bg-black/80',
+    'min-h-11 rounded-[12px] bg-black px-6 py-3 text-base font-semibold tracking-[-0.01em] text-white shadow-[0_1px_0_rgb(255_255_255_/_0.12)_inset] transition-[background-color,box-shadow,transform] duration-200 hover:bg-black/85',
   'primary-light':
-    'min-h-11 rounded-[10px] bg-white px-6 py-3 text-base font-semibold text-black transition-colors duration-200 hover:bg-white/90',
+    'min-h-11 rounded-[12px] bg-white px-6 py-3 text-base font-semibold tracking-[-0.01em] text-black shadow-[0_1px_0_rgb(255_255_255_/_0.9)_inset,0_8px_24px_rgb(0_0_0_/_0.18)] transition-[background-color,box-shadow,transform] duration-200 hover:bg-white/92',
   'outline-dark':
-    'min-h-11 rounded-[10px] border border-hairline bg-transparent px-6 py-3 text-base font-medium text-ink transition-colors duration-200 hover:border-ink/40',
+    'min-h-11 rounded-[12px] border border-hairline bg-transparent px-6 py-3 text-base font-medium tracking-[-0.01em] text-ink transition-[border-color,background-color,transform] duration-200 hover:border-ink/35 hover:bg-ink/[0.03]',
   'outline-light':
-    'min-h-11 rounded-[10px] border border-white/20 bg-transparent px-6 py-3 text-base font-medium text-white transition-colors duration-200 hover:border-white hover:bg-white/5',
+    'min-h-11 rounded-[12px] border border-white/18 bg-transparent px-6 py-3 text-base font-medium tracking-[-0.01em] text-white transition-[border-color,background-color,transform] duration-200 hover:border-white/55 hover:bg-white/[0.06]',
   'ghost-dark':
-    'min-h-11 rounded-[10px] px-4 py-2 text-base font-medium text-ink/70 transition-colors duration-200 hover:text-ink',
+    'min-h-11 rounded-[12px] px-4 py-2 text-base font-medium text-ink/70 transition-[color,transform] duration-200 hover:text-ink',
   'ghost-light':
-    'min-h-11 rounded-[10px] px-4 py-2 text-base font-medium text-white/70 transition-colors duration-200 hover:text-white',
+    'min-h-11 rounded-[12px] px-4 py-2 text-base font-medium text-white/70 transition-[color,transform] duration-200 hover:text-white',
 }
 
 export default function Button({
