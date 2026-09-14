@@ -107,24 +107,34 @@ export const pricingPlans = [
 
 export const faqs = [
   {
+    question: 'What is PROXY?',
+    answer:
+      'PROXY is a fast, customizable AI chat assistant for Windows and the web. You shape replies with reusable “states” — named triggers that carry instructions — so you are not rewriting the same system prompt every time.',
+  },
+  {
     question: 'What is a PROXY state?',
     answer:
-      'A state is a named chat setup: trigger word, instructions, and optional model settings. In chat, put the trigger first, such as Simplify draft this email.',
+      'A state is a named chat setup: a trigger word, instructions, and optional model settings. In chat, put the trigger first, such as Simplify draft this email, and PROXY applies that state’s instructions to the reply.',
   },
   {
     question: 'What differentiates PROXY from other AI chatbots?',
     answer:
-      'PROXY uses reusable “states” that you can activate by name, so replies follow the instructions you need. You can use the same account in the Windows app or browser. Choose official or community-made states, or create and share your own with Pro.',
+      'PROXY centers on reusable states you activate by name, so replies follow the instructions you need. One account works in the Windows app and in the browser. You can use official or community states, or create and share your own with Pro.',
   },
   {
     question: 'Where can I use PROXY?',
     answer:
-      'On the Windows desktop app and in PROXY Web. Sign in with the same PROXY account on both.',
+      'On the Windows desktop app and in PROXY Web at getproxy.ca. Sign in with the same PROXY account on both so states and plan access stay in sync.',
   },
   {
     question: 'How do I get the Windows app?',
     answer:
-      'Use any Download for Windows button on this site. It fetches the latest PROXY-Setup installer from GitHub Releases. You can also open the Releases page and pick an older build.',
+      'Use any Download for Windows button on getproxy.ca. It downloads the latest PROXY-Setup installer from GitHub Releases. You can also open the Releases page to pick an older build.',
+  },
+  {
+    question: 'How much does PROXY cost?',
+    answer:
+      'Free accounts can chat with a small lifetime allowance (about 30 requests) and three built-in states: Simplify, List, and Critique. Pro is $10 per month or $99 per year for a monthly chat allowance plus creating and publishing custom states. Billing is managed on getproxy.ca.',
   },
   {
     question: 'Do I need a paid plan to chat?',
@@ -134,14 +144,18 @@ export const faqs = [
   {
     question: 'Where do I change my plan or payment method?',
     answer:
-      'Open Account → Billing on this website. The desktop app links to the same billing page; it does not process cards itself.',
+      'Open Account → Billing on getproxy.ca. The desktop app links to the same billing page; it does not process cards itself.',
+  },
+  {
+    question: 'Who makes PROXY?',
+    answer:
+      'PROXY is built by Sterben. Support and contact: contact@sterben.dev. The Windows app source and releases live on GitHub at HSterben/Proxy.',
   },
 ]
 
 export const socialLinks = [
-  { label: 'Twitter', href: 'https://x.com' },
   { label: 'GitHub', href: 'https://github.com/HSterben/Proxy' },
-  { label: 'Discord', href: 'https://discord.com' },
+  { label: 'LinkedIn', href: 'https://www.linkedin.com/in/hsterben/' },
 ]
 
 /** Public GitHub repo used for Windows installs + desktop auto-updates. */

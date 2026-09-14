@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
+import { jsonLdForPath } from '../../lib/aeo'
 import {
   DEFAULT_TITLE,
   OG_IMAGE_ALT,
@@ -12,6 +13,8 @@ import {
   metaForPath,
 } from '../../lib/seo'
 
+const JSON_LD_ID = 'proxy-jsonld'
+
 function upsertMeta(attr: 'name' | 'property', key: string, content: string) {
   let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
   if (!el) {
@@ -22,17 +25,36 @@ function upsertMeta(attr: 'name' | 'property', key: string, content: string) {
   el.setAttribute('content', content)
 }
 
-function upsertLink(rel: string, href: string) {
-  let el = document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`)
+function upsertLink(rel: string, href: string, attrs?: Record<string, string>) {
+  const selector = attrs
+    ? `link[rel="${rel}"]${Object.entries(attrs)
+        .map(([k, v]) => `[${k}="${v}"]`)
+        .join('')}`
+    : `link[rel="${rel}"]`
+  let el = document.head.querySelector<HTMLLinkElement>(selector)
   if (!el) {
     el = document.createElement('link')
     el.rel = rel
+    if (attrs) {
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
+    }
     document.head.appendChild(el)
   }
   el.href = href
 }
 
-/** Keeps title, description, canonical, and social tags in sync with the active route. */
+function upsertJsonLd(data: unknown) {
+  let el = document.getElementById(JSON_LD_ID) as HTMLScriptElement | null
+  if (!el) {
+    el = document.createElement('script')
+    el.type = 'application/ld+json'
+    el.id = JSON_LD_ID
+    document.head.appendChild(el)
+  }
+  el.textContent = JSON.stringify(data)
+}
+
+/** Keeps title, description, canonical, social tags, and JSON-LD in sync with the route. */
 export default function DocumentMeta() {
   const { pathname } = useLocation()
 
@@ -40,11 +62,23 @@ export default function DocumentMeta() {
     const meta = metaForPath(pathname)
     const url = absoluteUrl(meta.path)
     const title = meta.title || DEFAULT_TITLE
+    const indexable = meta.index !== false
 
     document.title = title
 
     upsertMeta('name', 'description', meta.description)
-    upsertMeta('name', 'robots', meta.index === false ? 'noindex, nofollow' : 'index, follow, max-image-preview:large')
+    upsertMeta(
+      'name',
+      'robots',
+      indexable
+        ? 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+        : 'noindex, nofollow',
+    )
+    upsertMeta(
+      'name',
+      'googlebot',
+      indexable ? 'index, follow, max-image-preview:large' : 'noindex, nofollow',
+    )
 
     upsertMeta('property', 'og:title', title)
     upsertMeta('property', 'og:description', meta.description)
@@ -57,6 +91,7 @@ export default function DocumentMeta() {
     upsertMeta('property', 'og:image:width', String(OG_IMAGE_WIDTH))
     upsertMeta('property', 'og:image:height', String(OG_IMAGE_HEIGHT))
     upsertMeta('property', 'og:image:alt', OG_IMAGE_ALT)
+    upsertMeta('property', 'og:locale', 'en_CA')
 
     upsertMeta('name', 'twitter:card', 'summary_large_image')
     upsertMeta('name', 'twitter:title', title)
@@ -65,9 +100,16 @@ export default function DocumentMeta() {
     upsertMeta('name', 'twitter:image:alt', OG_IMAGE_ALT)
 
     upsertLink('canonical', url)
+    upsertLink('alternate', url, { hreflang: 'en' })
+    upsertLink('alternate', url, { hreflang: 'en-CA' })
+    upsertLink('alternate', url, { hreflang: 'x-default' })
 
-    // Ensure absolute og:url base stays correct if the host ever differs in preview deploys
-    upsertMeta('property', 'og:locale', 'en_CA')
+    if (indexable) {
+      upsertJsonLd(jsonLdForPath(pathname))
+    } else {
+      document.getElementById(JSON_LD_ID)?.remove()
+    }
+
     void SITE_URL
   }, [pathname])
 

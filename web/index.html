@@ -7,11 +7,11 @@
     <title>PROXY — Fast customizable AI assistance</title>
     <meta
       name="description"
-      content="PROXY is a fast, customizable AI assistant for Windows and the web. Use named states — triggers with your instructions — so every reply matches how you work. Streaming chat, synced account, states gallery."
+      content="PROXY is a fast, customizable AI assistant for Windows and the web. Use named states — trigger words with your instructions — so every reply matches how you work. Free tier available; Pro from $10/month. Streaming chat, synced account, states gallery at getproxy.ca."
     />
     <meta
       name="keywords"
-      content="PROXY, AI assistant, customizable AI, named triggers, AI states, Windows AI chat, web AI chat, streaming AI, getproxy"
+      content="PROXY, PROXY AI, getproxy.ca, AI assistant, customizable AI, named triggers, AI states, Windows AI chat, web AI chat, streaming AI, Simplify List Critique"
     />
     <meta name="author" content="PROXY" />
     <meta name="creator" content="PROXY" />
@@ -70,7 +70,7 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
 
-    <script type="application/ld+json">
+    <script type="application/ld+json" id="proxy-jsonld">
       {
         "@context": "https://schema.org",
         "@graph": [
@@ -94,6 +94,7 @@
             "@id": "https://getproxy.ca/#website",
             "url": "https://getproxy.ca/",
             "name": "PROXY",
+            "alternateName": ["PROXY AI", "getproxy.ca"],
             "description": "Fast customizable AI assistance. Named triggers that shape every reply.",
             "publisher": { "@id": "https://getproxy.ca/#organization" },
             "inLanguage": "en-CA"
@@ -106,7 +107,7 @@
             "operatingSystem": "Windows, Web",
             "url": "https://getproxy.ca/",
             "image": "https://getproxy.ca/og-preview.png",
-            "description": "PROXY is a fast, customizable AI assistant. Use named states — triggers with your instructions — so every reply matches how you work.",
+            "description": "PROXY is a fast, customizable AI assistant. Use named states — triggers with your instructions — so every reply matches how you work. Free tier available; Pro from $10/month.",
             "offers": [
               {
                 "@type": "Offer",
@@ -118,11 +119,46 @@
                 "@type": "Offer",
                 "name": "Pro",
                 "price": "10",
-                "priceCurrency": "USD",
-                "billingDuration": "P1M"
+                "priceCurrency": "USD"
+              },
+              {
+                "@type": "Offer",
+                "name": "Yearly",
+                "price": "99",
+                "priceCurrency": "USD"
               }
             ],
             "publisher": { "@id": "https://getproxy.ca/#organization" }
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://getproxy.ca/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "What is PROXY?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "PROXY is a fast, customizable AI chat assistant for Windows and the web. You shape replies with reusable states — named triggers that carry instructions — so you are not rewriting the same system prompt every time."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "How much does PROXY cost?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Free accounts get a small lifetime chat allowance and three built-in states. Pro is $10 per month or $99 per year. Billing is managed on getproxy.ca."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What is a PROXY state?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "A state is a named chat setup: a trigger word, instructions, and optional model settings. Put the trigger first in chat to apply that state's instructions."
+                }
+              }
+            ]
           }
         ]
       }

@@ -1,8 +1,60 @@
+# https://getproxy.ca/robots.txt
 User-agent: *
 Allow: /
+Allow: /llms.txt
 Disallow: /app
 Disallow: /auth/
 Disallow: /account
 Disallow: /account/
+
+# Answer-engine / AI crawlers: allow public marketing pages
+User-agent: GPTBot
+Allow: /
+Allow: /llms.txt
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
+
+User-agent: ChatGPT-User
+Allow: /
+Allow: /llms.txt
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
+
+User-agent: Google-Extended
+Allow: /
+Allow: /llms.txt
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
+
+User-agent: ClaudeBot
+Allow: /
+Allow: /llms.txt
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
+
+User-agent: anthropic-ai
+Allow: /
+Allow: /llms.txt
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
+
+User-agent: PerplexityBot
+Allow: /
+Allow: /llms.txt
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
+
+User-agent: Applebot-Extended
+Allow: /
+Allow: /llms.txt
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
 
 Sitemap: https://getproxy.ca/sitemap.xml
