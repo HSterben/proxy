@@ -5,6 +5,7 @@ import { Loader2, Trash2 } from 'lucide-react'
 import { useAuth } from '../auth/AuthSessionProvider'
 import { api } from '../convex/api'
 import { convexUrl } from '../lib/convexUrls'
+import { userFacingError } from '../lib/userFacingError'
 import ProfileAvatar from '../components/ui/ProfileAvatar'
 
 type AccountSnapshot = {
@@ -135,7 +136,7 @@ export default function Account() {
       await refreshProfileAndPosts()
       showProfileNotice('Display name saved')
     } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Could not save name')
+      setProfileError(userFacingError(err, 'Could not save name'))
     } finally {
       setProfileSaving(false)
     }
@@ -152,7 +153,7 @@ export default function Account() {
       await refreshProfileAndPosts()
       showProfileNotice('Using account name again')
     } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Could not reset name')
+      setProfileError(userFacingError(err, 'Could not reset name'))
     } finally {
       setProfileSaving(false)
     }
@@ -189,7 +190,7 @@ export default function Account() {
       await refreshProfileAndPosts()
       showProfileNotice('Profile picture updated')
     } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Could not upload picture')
+      setProfileError(userFacingError(err, 'Could not upload picture'))
     } finally {
       setAvatarUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -205,7 +206,7 @@ export default function Account() {
       await refreshProfileAndPosts()
       showProfileNotice('Profile picture removed')
     } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Could not remove picture')
+      setProfileError(userFacingError(err, 'Could not remove picture'))
     } finally {
       setAvatarUploading(false)
     }
@@ -286,7 +287,7 @@ export default function Account() {
       closeEdit()
       showProfileNotice('State updated')
     } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Could not save changes')
+      setProfileError(userFacingError(err, 'Could not save changes'))
     } finally {
       setBusyId(null)
     }
@@ -303,7 +304,7 @@ export default function Account() {
       if (editingId === postId) closeEdit()
       showProfileNotice('State deleted')
     } catch (err) {
-      setProfileError(err instanceof Error ? err.message : 'Could not delete')
+      setProfileError(userFacingError(err, 'Could not delete'))
     } finally {
       setBusyId(null)
     }

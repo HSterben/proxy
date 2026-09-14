@@ -70,7 +70,7 @@ export default defineSchema({
     .index('by_visibility', ['visibility']),
 
   /**
-   * M:N library membership — one row per (user, state).
+   * M:N library membership, one row per (user, state).
    * Optional `states` / `updatedAt` remain so legacy blob rows on older
    * deployments can validate until migrateLegacyUserStates converts them.
    */

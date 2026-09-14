@@ -9,6 +9,7 @@ import { useAuth } from '../auth/AuthSessionProvider'
 import { claimSignupQuota } from '../auth/claimSignup'
 import { api } from '../convex/api'
 import { convexSiteUrl, convexUrl } from '../lib/convexUrls'
+import { userFacingError } from '../lib/userFacingError'
 import { AI_RESPONSE_MODE, fetchAiReply } from '../lib/aiResponseMode'
 import { normalizeAiMarkdown } from '../lib/aiMarkdown'
 import BrandMark from '../components/ui/BrandMark'
@@ -315,7 +316,7 @@ export default function AppChat() {
       if (!data.url) throw new Error('No checkout URL returned.')
       window.location.href = data.url
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to start checkout')
+      alert(userFacingError(err, 'Failed to start checkout'))
     } finally {
       setCheckoutLoading(false)
     }
@@ -334,7 +335,7 @@ export default function AppChat() {
       if (!data.url) throw new Error('No portal URL returned.')
       window.location.href = data.url
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to open billing portal')
+      alert(userFacingError(err, 'Failed to open billing portal'))
     } finally {
       setPortalLoading(false)
     }
@@ -493,7 +494,7 @@ export default function AppChat() {
         ...prev.filter((msg) => msg.id !== aiMessageId),
         {
           id: Date.now() + 1,
-          text: `Error: ${error instanceof Error ? error.message : 'Failed to get response.'}`,
+          text: `Error: ${userFacingError(error, 'Failed to get response.')}`,
           sender: 'ai',
           timestamp: new Date(),
         },
@@ -806,7 +807,7 @@ export default function AppChat() {
         <div className="chat-auth-content">
           <h2>Out of free tokens</h2>
           <p>
-            Free accounts include 30,000 weighted tokens (lifetime). Subscribe to keep chatting on
+            Free accounts include up to about 30 requests (lifetime). Subscribe to keep chatting on
             PROXY Web and Windows.
           </p>
           <button

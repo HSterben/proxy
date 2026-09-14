@@ -94,7 +94,7 @@ const publicProfileValidator = v.object({
   publishedCount: v.number(),
 });
 
-// Create or update a user from WorkOS webhook
+// Upsert from WorkOS webhook / auth flows
 export const upsertUser = mutation({
   args: {
     workosId: v.string(),

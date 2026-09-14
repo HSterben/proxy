@@ -114,7 +114,7 @@ export const faqs = [
   {
     question: 'What differentiates PROXY from other AI chatbots?',
     answer:
-      'Usefulness. PROXY is built around states—reusable setups you trigger by name—so every reply can follow the instructions you care about instead of a one-size-fits-all chat. Accessibility means the same account works on a lightweight Windows app and in the browser. Customizability means you can start with official states, save gallery ones, or (on Pro) write and publish your own so the product bends to how you actually work.',
+      'PROXY uses reusable “states” that you can activate by name, so replies follow the instructions you need. You can use the same account in the Windows app or browser. Choose official or community-made states, or create and share your own with Pro.',
   },
   {
     question: 'Where can I use PROXY?',

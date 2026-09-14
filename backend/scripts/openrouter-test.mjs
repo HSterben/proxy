@@ -1,5 +1,5 @@
 /**
- * Direct OpenRouter test — same API as the app (model/prompt via env).
+ * Direct OpenRouter test, same API as the app (model/prompt via env).
  *
  * From backend folder:
  *   npm run test:openrouter

@@ -55,7 +55,7 @@
     background-attachment: fixed;
   }
 
-  /* WebKit / Blink — slim thumb that reads on paper and graphite */
+  /* WebKit / Blink, slim thumb that reads on paper and graphite */
   *::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -128,7 +128,7 @@
     letter-spacing: 0.18em;
   }
 
-  /* Instant press feedback — Apple: respond on pointer-down, ~100ms */
+  /* Instant press feedback, Apple: respond on pointer-down, ~100ms */
   .pressable {
     transition:
       transform 100ms ease-out,
@@ -196,7 +196,7 @@
     border: 1px solid rgb(255 255 255 / 0.18);
   }
 
-  /* Fixed site nav — translucent material; content scrolls under */
+  /* Fixed site nav, translucent material; content scrolls under */
   .site-nav {
     isolation: isolate;
     backdrop-filter: saturate(190%) blur(32px);
@@ -270,7 +270,7 @@
     }
   }
 
-  /* Segmented control — instant press, material selected state */
+  /* Segmented control, instant press, material selected state */
   .segment-track {
     border-radius: 12px;
     padding: 3px;

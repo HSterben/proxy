@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import TitleBar from "../components/TitleBar";
 import { useTheme } from "../hooks/useTheme";
+import { userFacingError } from "../lib/userFacingError";
 import "./SettingsView.css";
 
 const api = typeof window !== "undefined" ? window.electronAPI : null;
@@ -203,7 +204,7 @@ export default function SettingsView() {
       await api?.openLogin?.();
     } catch (e) {
       setSigningIn(false);
-      showMessage(e?.message || "Couldn’t open the sign-in page", true);
+      showMessage(userFacingError(e, "Couldn’t open the sign-in page"), true);
     }
   };
 
@@ -213,7 +214,7 @@ export default function SettingsView() {
       setSignedIn(false);
       showMessage("Signed out of PROXY.");
     } catch (e) {
-      showMessage(e?.message || "Couldn’t sign out", true);
+      showMessage(userFacingError(e, "Couldn’t sign out"), true);
     }
   };
 

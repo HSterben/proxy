@@ -108,7 +108,7 @@ function buildPayload(options: GenerateOptions, stream: boolean) {
 
 /**
  * Non-streaming completion via OpenRouter (Luna by default).
- * OpenRouter can apply its own provider fallbacks — PROXY does not route.
+ * OpenRouter can apply its own provider fallbacks, PROXY does not route.
  */
 export async function generateAI(
   options: GenerateOptions

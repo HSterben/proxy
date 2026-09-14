@@ -418,8 +418,14 @@ design-system/
 AGENTS.local.md
 CLAUDE.local.md
 GEMINI.local.md
+.claude/settings.local.json
+.aider.chat.history.md
+.aider.input.history
 *.local-plan.md
 *.local-handoff.md
+*.log
+tmp/
+.temp/
 
 # Graphify AST cache (regenerated locally)
 **/graphify-out/

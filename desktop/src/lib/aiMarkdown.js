@@ -52,7 +52,7 @@ export function normalizeAiMarkdown(text) {
     return `\n$$\n${inner.trim()}\n$$\n`;
   });
 
-  // Inline paren math — only outside existing math
+  // Inline paren math, only outside existing math
   out = mapOutsideMath(out, (segment) =>
     segment.replace(
       /\((\\[a-zA-Z]+\{[^}]*\}[^)\n]{0,80}|[^()\n]{0,40}\\[a-zA-Z]+[^)\n]{0,40})\)/g,

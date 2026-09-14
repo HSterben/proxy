@@ -1,8 +1,8 @@
 /**
  * AI reply delivery mode.
  *
- * - `'stream'`   — SSE chunks update the UI as they arrive (typing effect)
- * - `'complete'` — wait for the full response, then show it once
+ * - `'stream'`  , SSE chunks update the UI as they arrive (typing effect)
+ * - `'complete'`, wait for the full response, then show it once
  *
  * Flip this one constant to switch behavior.
  */
@@ -39,7 +39,7 @@ export async function fetchAiReply(opts: {
     } catch (err) {
       console.warn('[AI] Stream failed, falling back to complete:', err)
       const { content, blocked } = toContent(await complete())
-      // Caller replaces message text with `content` — do not append via onChunk
+      // Caller replaces message text with `content`, do not append via onChunk
       return { content, blocked, usedStream: false }
     }
   }

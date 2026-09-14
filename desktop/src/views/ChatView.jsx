@@ -10,6 +10,7 @@ import AppShell from '../components/AppShell';
 import ProxyMark from '../components/ProxyMark';
 import WindowControls from '../components/WindowControls';
 import { convexUrl, convexSiteUrl } from '../lib/convexUrls';
+import { userFacingError } from '../lib/userFacingError';
 import { AI_RESPONSE_MODE, fetchAiReply } from '../lib/aiResponseMode';
 import { normalizeAiMarkdown } from '../lib/aiMarkdown';
 import {
@@ -432,7 +433,6 @@ const ChatView = () => {
     };
   }, []);
 
-  // Helper to refresh auth and update Convex client
   const refreshAndRetry = async () => {
     try {
       const result = await window.electronAPI.refreshAuthToken();
@@ -444,7 +444,7 @@ const ChatView = () => {
     } catch (err) {
       console.error('Failed to refresh token:', err);
     }
-    // Keep chat UI mounted — show an inline error instead of jumping to the login screen
+    // Keep chat UI mounted, show an inline error instead of jumping to the login screen
     return false;
   };
 
@@ -545,12 +545,11 @@ const ChatView = () => {
     const ctx = canvas.getContext('2d');
     canvas.width = 800;
     canvas.height = 1000;
-    
-    // Draw white background
+
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Draw PDF icon placeholder
+
+    // PDF attachments are sent as a labeled image stand-in (no pdf.js text extract yet).
     ctx.fillStyle = '#666666';
     ctx.font = '48px Arial';
     ctx.textAlign = 'center';
@@ -619,7 +618,6 @@ const ChatView = () => {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.error || `HTTP error: ${response.status}`;
         
-        // Check if it's an authentication error and we haven't retried yet
         if (!isRetry && (response.status === 401 || errorMessage.includes('Authentication'))) {
           const refreshed = await refreshAndRetry();
           if (refreshed) {
@@ -643,7 +641,6 @@ const ChatView = () => {
         throw new Error(errorMessage);
       }
 
-      // Read the stream
       if (!response.body) {
         throw new Error('Streaming is unavailable right now. Try again in a moment.');
       }
@@ -659,11 +656,9 @@ const ChatView = () => {
         const { done, value } = await reader.read();
         
         if (done) {
-          // Process any remaining buffered data
           if (buffer.trim()) {
             const lines = buffer.split('\n');
             for (const line of lines) {
-              // Handle SSE format: "data: {...}" or just "data:"
               if (line.startsWith('data: ')) {
                 const data = line.slice(6).trim();
                 if (data === '[DONE]') {
@@ -674,13 +669,12 @@ const ChatView = () => {
                     const parsed = JSON.parse(data);
                     const delta = parsed.choices?.[0]?.delta;
                     
-                    // Handle content in delta
                     if (delta?.content) {
                       fullContent += delta.content;
                       onChunk(delta.content);
                     }
                     
-                    // Also check for content in message (some APIs use this format)
+                    // Some upstream payloads put content on message instead of delta.
                     const message = parsed.choices?.[0]?.message;
                     if (message?.content) {
                       fullContent += message.content;
@@ -692,7 +686,6 @@ const ChatView = () => {
                       finishReason = parsed.choices[0].finish_reason;
                     }
                   } catch (e) {
-                    // Check if it's an error message
                     try {
                       const errorData = JSON.parse(data);
                       if (errorData.error) {
@@ -712,7 +705,6 @@ const ChatView = () => {
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          // Handle SSE format: "data: {...}" or just "data:"
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim();
             if (data === '[DONE]') {
@@ -728,13 +720,12 @@ const ChatView = () => {
                 const parsed = JSON.parse(data);
                 const delta = parsed.choices?.[0]?.delta;
                 
-                // Handle content in delta
                 if (delta?.content) {
                   fullContent += delta.content;
-                  onChunk(delta.content); // Call the callback with each chunk
+                  onChunk(delta.content);
                 }
                 
-                // Also check for content in message (some APIs use this format)
+                // Some upstream payloads put content on message instead of delta.
                 const message = parsed.choices?.[0]?.message;
                 if (message?.content) {
                   fullContent += message.content;
@@ -851,14 +842,13 @@ const ChatView = () => {
       }
     } catch (error) {
       console.error('Error checking account:', error);
-      setAccountGateReason(error?.message || 'Couldn’t verify your plan. Sign in and try again.');
+      setAccountGateReason(userFacingError(error, 'Couldn’t verify your plan. Sign in and try again.'));
       setSubscriptionRequired(true);
       return;
     }
 
     setIsLoading(true);
-    
-    // Create a placeholder message that we'll update as we stream
+
     const aiMessageId = Date.now() + 1;
     const aiMessage = {
       id: aiMessageId,
@@ -868,7 +858,6 @@ const ChatView = () => {
       isStreaming: true
     };
 
-    // Add placeholder message immediately
     setMessages(prev => [...prev, aiMessage]);
 
     try {
@@ -1063,7 +1052,7 @@ const ChatView = () => {
       setMessages(prev => prev.filter(msg => msg.id !== aiMessageId));
       const errorMessage = {
         id: Date.now() + 1,
-        text: `Error: ${error instanceof Error ? error.message : 'Couldn’t get a reply. Try again.'}`,
+        text: `Error: ${userFacingError(error, 'Couldn’t get a reply. Try again.')}`,
         sender: 'ai',
         timestamp: new Date()
       };
@@ -1284,14 +1273,11 @@ const ChatView = () => {
 
     const fileDataPromises = validFiles.map(async (file) => {
       if (file.type === 'application/pdf') {
-        // Convert PDF to image placeholder
-        // Note: This creates a placeholder. For full PDF text extraction,
-        // you would need to use pdf.js or a similar library
+        // PDF → labeled image stand-in (no pdf.js text extract yet).
         try {
           return await pdfToImage(file);
         } catch (error) {
           console.error('Error processing PDF:', error);
-          // Fallback: create a simple placeholder
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
           canvas.width = 400;
@@ -1312,7 +1298,6 @@ const ChatView = () => {
           };
         }
       } else {
-        // Handle images
         const dataUrl = await fileToBase64(file);
         return {
           file,
@@ -1325,8 +1310,7 @@ const ChatView = () => {
 
     const fileData = await Promise.all(fileDataPromises);
     setAttachedFiles(prev => [...prev, ...fileData]);
-    
-    // Reset file input
+
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -1341,15 +1325,12 @@ const ChatView = () => {
     const messageText = inputValue.trim();
     
     if ((!messageText && attachedFiles.length === 0) || isLoading) return;
-    
-    // Store files for this message
+
     const filesToSend = [...attachedFiles];
-    
-    // Clear input and files immediately
+
     setInputValue('');
     setAttachedFiles([]);
-    
-    // Add user message to UI
+
     const userMessage = {
       id: Date.now(),
       text: messageText || (filesToSend.length > 0 ? 'Attached files' : ''),

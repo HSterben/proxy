@@ -3,6 +3,7 @@ import { ConvexClient } from "convex/browser";
 import { api as convexApi } from "../../../backend/convex/_generated/api";
 import TitleBar from "../components/TitleBar";
 import { convexUrl } from "../lib/convexUrls";
+import { userFacingError } from "../lib/userFacingError";
 import { clampOutputTokens } from "../lib/contextBudget";
 import "./SettingsView.css";
 import "./PresetsView.css";
@@ -335,7 +336,7 @@ export default function PresetsView() {
         presets =
           readResult?.success && readResult.presets ? readResult.presets : {};
         if (source === "manual") {
-          showMessage(cloudErr?.message || "Couldn’t refresh states from your account.", true);
+          showMessage(userFacingError(cloudErr, "Couldn’t refresh states from your account."), true);
         }
       }
 
@@ -356,7 +357,7 @@ export default function PresetsView() {
       }
     } catch (e) {
       console.error(e);
-      showMessage(e?.message || "Couldn’t load states.", true);
+      showMessage(userFacingError(e, "Couldn’t load states."), true);
     } finally {
       loadingRef.current = false;
       setLoading(false);
@@ -445,7 +446,7 @@ export default function PresetsView() {
       await api?.openLogin?.();
     } catch (e) {
       setSigningIn(false);
-      showMessage(e?.message || "Couldn’t open the sign-in page.", true);
+      showMessage(userFacingError(e, "Couldn’t open the sign-in page."), true);
     }
   };
 
@@ -456,7 +457,7 @@ export default function PresetsView() {
       convex.current.setAuth(async () => null);
       showMessage("Signed out. States on this device are unchanged.");
     } catch (e) {
-      showMessage(e?.message || "Couldn’t sign out.", true);
+      showMessage(userFacingError(e, "Couldn’t sign out."), true);
     }
   };
 
@@ -531,7 +532,7 @@ export default function PresetsView() {
     if (!api?.writePresets) return;
     const err = validateBeforeSave();
     if (err) {
-      showMessage(err, true);
+      showMessage(userFacingError(err, "Couldn’t save states."), true);
       return;
     }
     const payload = entriesToPresetsObject(entries);
@@ -571,7 +572,7 @@ export default function PresetsView() {
       fingerprintRef.current = contentFingerprint(synced);
       showMessage("States saved.");
     } catch (e) {
-      showMessage(e?.message || "Couldn’t save states.", true);
+      showMessage(userFacingError(e, "Couldn’t save states."), true);
     } finally {
       setSaving(false);
     }

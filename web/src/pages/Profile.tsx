@@ -5,6 +5,7 @@ import { Loader2, Star } from 'lucide-react'
 import { useAuth } from '../auth/AuthSessionProvider'
 import { api } from '../convex/api'
 import { convexUrl } from '../lib/convexUrls'
+import { userFacingError } from '../lib/userFacingError'
 import ProfileAvatar from '../components/ui/ProfileAvatar'
 import Reveal from '../components/ui/Reveal'
 
@@ -69,7 +70,7 @@ export default function Profile() {
       } catch (err) {
         if (cancelled) return
         console.error(err)
-        setError(err instanceof Error ? err.message : 'Could not load profile')
+        setError(userFacingError(err, 'Could not load profile'))
         setProfile(null)
         setPosts([])
       }

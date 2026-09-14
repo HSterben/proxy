@@ -7,7 +7,7 @@ type RevealProps = {
   delay?: number
 }
 
-/** Critically damped spring — Apple default for non-momentum UI (bounce 0, ~0.4s response). */
+/** Critically damped spring, Apple default for non-momentum UI (bounce 0, ~0.4s response). */
 export default function Reveal({ children, className = '', delay = 0 }: RevealProps) {
   const reduce = useReducedMotion()
 

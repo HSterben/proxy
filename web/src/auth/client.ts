@@ -12,7 +12,7 @@ export function workosRedirectUri() {
 /**
  * Cookie-based AuthKit sessions only stick across visits with a custom auth domain
  * (`VITE_WORKOS_API_HOSTNAME`). Without that, use devMode so the refresh token lives
- * in localStorage — same idea as “stay signed in” on a normal website.
+ * in localStorage, same idea as “stay signed in” on a normal website.
  */
 export function workosDevMode() {
   const override = import.meta.env.VITE_WORKOS_DEV_MODE
@@ -57,7 +57,7 @@ export async function switchWorkosAccount(state?: { returnTo?: string }) {
   try {
     await client.signOut({ navigate: false })
   } catch {
-    // No active session.
+    // Already signed out — continue to account picker.
   }
 
   window.localStorage.removeItem(REFRESH_TOKEN_KEY)

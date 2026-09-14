@@ -4,6 +4,7 @@ import { ConvexClient } from 'convex/browser'
 import { useAuth } from '../auth/AuthSessionProvider'
 import { api } from '../convex/api'
 import { convexSiteUrl, convexUrl } from '../lib/convexUrls'
+import { userFacingError } from '../lib/userFacingError'
 
 export default function Billing() {
   const { user, isLoading, signIn, getAccessToken } = useAuth()
@@ -61,7 +62,7 @@ export default function Billing() {
       if (!data.url) throw new Error('No checkout URL returned')
       window.location.href = data.url
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Checkout failed')
+      setError(userFacingError(err, 'Checkout failed'))
       setLoading(null)
     }
   }
@@ -74,7 +75,7 @@ export default function Billing() {
       if (!data.url) throw new Error('No portal URL returned')
       window.location.href = data.url
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open billing portal')
+      setError(userFacingError(err, 'Could not open billing portal'))
       setLoading(null)
     }
   }

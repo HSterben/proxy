@@ -8,6 +8,7 @@ import { api } from '../convex/api'
 import { convexUrl } from '../lib/convexUrls'
 import Reveal from '../components/ui/Reveal'
 import { AuthorByline } from '../components/ui/ProfileAvatar'
+import { userFacingError } from '../lib/userFacingError'
 
 const TAG_OPTIONS = ['Writing', 'Creative', 'Utility', 'Translation', 'Fun'] as const
 
@@ -127,11 +128,7 @@ export default function States() {
     } catch (err) {
       console.error(err)
       setPosts([])
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Could not load community states. Deploy the latest Convex backend.',
-      )
+      setError(userFacingError(err, 'Could not load community states.'))
     }
   }
 
@@ -238,7 +235,7 @@ export default function States() {
           : prev,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save state')
+      setError(userFacingError(err, 'Could not save state'))
     } finally {
       setBusyId(null)
     }
@@ -262,7 +259,7 @@ export default function States() {
           : prev,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update star')
+      setError(userFacingError(err, 'Could not update star'))
     } finally {
       setBusyId(null)
     }
@@ -283,7 +280,7 @@ export default function States() {
           : prev,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove state')
+      setError(userFacingError(err, 'Could not remove state'))
     } finally {
       setBusyId(null)
     }
@@ -352,7 +349,7 @@ export default function States() {
       closeEdit()
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save changes')
+      setError(userFacingError(err, 'Could not save changes'))
     } finally {
       setBusyId(null)
     }
@@ -369,7 +366,7 @@ export default function States() {
       if (editingId === postId) closeEdit()
       setPosts((prev) => (prev ? prev.filter((p) => p._id !== postId) : prev))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not delete')
+      setError(userFacingError(err, 'Could not delete'))
     } finally {
       setBusyId(null)
     }
@@ -473,7 +470,7 @@ export default function States() {
       if (mine?.states) setMyStates(mine.states as MyStatesMap)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save state')
+      setError(userFacingError(err, 'Could not save state'))
     } finally {
       setPublishing(false)
     }
@@ -951,7 +948,7 @@ export default function States() {
                           <span className="inline-flex min-h-10 items-center rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/55">
                             Included on free
                           </span>
-                        ) : post.isOfficial && !canPublishStates ? (
+                        ) : !canPublishStates ? (
                           <Link
                             to="/account/billing"
                             className="pressable inline-flex min-h-10 items-center gap-2 rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/75"

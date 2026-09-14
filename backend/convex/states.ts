@@ -16,7 +16,7 @@ import {
 } from './entitlements';
 import { FREE_STATE_NAMES, isFreeStateName } from './plans';
 
-/** One chat "state" (preset) — flexible fields match desktop presets JSON. */
+/** One chat "state" (preset), flexible fields match desktop presets JSON. */
 export const stateValueValidator = v.object({
   description: v.optional(v.string()),
   desc: v.optional(v.string()),
@@ -660,7 +660,7 @@ export const saveMyStates = mutation({
       }
 
       if (!subscribed) {
-        // Free: only official free-state refs — never create custom docs.
+        // Free: only official free-state refs, never create custom docs.
         const officialId = official.get(key);
         if (officialId && isFreeStateName(key)) {
           nextIds.push(officialId);

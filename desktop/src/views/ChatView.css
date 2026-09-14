@@ -1362,7 +1362,7 @@ html, body {
   }
 }
 
-/* Auth-check skeleton — mirrors chat layout */
+/* Auth-check skeleton, mirrors chat layout */
 .chat-skeleton {
   pointer-events: none;
 }

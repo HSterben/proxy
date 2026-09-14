@@ -66,7 +66,7 @@ function snapshotFromRow(
     };
   }
 
-  // Free / lapsed: lifetime pool — never reset.
+  // Free / lapsed: lifetime pool, never reset.
   if (!subscriptionActive) {
     return {
       weightedTokensUsed: row.weightedTokensUsed,

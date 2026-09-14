@@ -20,7 +20,7 @@ export class LargeMessageError extends Error {
 
   constructor(estimatedTokens: number, maxContextTokens: number) {
     super(
-      `This message is too large for the context window (≈${estimatedTokens.toLocaleString()} tokens; limit ${maxContextTokens.toLocaleString()}). Shorten it and try again — history was not sent and the message was not truncated.`,
+      `This message is too large for the context window (≈${estimatedTokens.toLocaleString()} tokens; limit ${maxContextTokens.toLocaleString()}). Shorten it and try again, history was not sent and the message was not truncated.`,
     )
     this.name = 'LargeMessageError'
     this.estimatedTokens = estimatedTokens
