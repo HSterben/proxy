@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_CONVEX_SITE_URL?: string
   readonly VITE_WORKOS_CLIENT_ID: string
   readonly VITE_WORKOS_REDIRECT_URI?: string
+  readonly VITE_WORKOS_API_HOSTNAME?: string
+  readonly VITE_WORKOS_DEV_MODE?: string
 }
 
 interface ImportMeta {

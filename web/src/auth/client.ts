@@ -9,6 +9,19 @@ export function workosRedirectUri() {
   return import.meta.env.VITE_WORKOS_REDIRECT_URI || `${window.location.origin}/auth/callback`
 }
 
+/**
+ * Cookie-based AuthKit sessions only stick across visits with a custom auth domain
+ * (`VITE_WORKOS_API_HOSTNAME`). Without that, use devMode so the refresh token lives
+ * in localStorage — same idea as “stay signed in” on a normal website.
+ */
+export function workosDevMode() {
+  const override = import.meta.env.VITE_WORKOS_DEV_MODE
+  if (override === 'true') return true
+  if (override === 'false') return false
+  if (!import.meta.env.VITE_WORKOS_API_HOSTNAME) return true
+  return Boolean(import.meta.env.DEV)
+}
+
 let clientPromise: Promise<AuthClient> | null = null
 let initError: Error | null = null
 let fetchPatched = false
@@ -66,9 +79,12 @@ export function getAuthClient() {
       return Promise.reject(initError)
     }
 
+    const apiHostname = import.meta.env.VITE_WORKOS_API_HOSTNAME as string | undefined
+
     clientPromise = createClient(clientId, {
       redirectUri: workosRedirectUri(),
-      devMode: import.meta.env.DEV,
+      ...(apiHostname ? { apiHostname } : {}),
+      devMode: workosDevMode(),
       onRedirectCallback: ({ state }) => {
         initError = null
         const returnTo =
