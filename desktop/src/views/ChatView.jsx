@@ -181,6 +181,7 @@ const ChatView = () => {
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [presets, setPresets] = useState({});
   const [activePreset, setActivePreset] = useState(null);
+  const [typedStateOverrides, setTypedStateOverrides] = useState(true);
   const [activeTone, setActiveTone] = useState('precise');
   const [messageFeedback, setMessageFeedback] = useState({});
 
@@ -190,7 +191,6 @@ const ChatView = () => {
   const messagesEndRef = useRef(null);
   const messagesScrollerRef = useRef(null);
   const fileInputRef = useRef(null);
-  const presetSyncedRef = useRef(false);
   const pendingPromptRef = useRef(null);
   const bootstrappedAiRef = useRef(false);
   const getAIResponseRef = useRef(null);
@@ -202,6 +202,22 @@ const ChatView = () => {
   useEffect(() => {
     sessionOptionsRef.current = null;
   }, [activePreset, activeTone]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI?.getTypedStateOverrides?.()
+      .then((value) => {
+        if (!cancelled) setTypedStateOverrides(value !== false);
+      })
+      .catch(() => {});
+    const unsub = window.electronAPI?.onTypedStateOverridesChanged?.((value) => {
+      setTypedStateOverrides(value !== false);
+    });
+    return () => {
+      cancelled = true;
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
 
   useEffect(() => {
     isAuthenticatedRef.current = isAuthenticated;
@@ -295,10 +311,17 @@ const ChatView = () => {
       presencePenalty: 0.3,
       stop: undefined,
     };
-    const rawFirst = (message || '').trim().split(/\s+/)[0] || '';
-    const firstWord = rawFirst.replace(/\W/g, ''); // strip punctuation so "Simplify," matches "Simplify"
-    if (activePreset && presetsMap[activePreset]) {
-      const p = presetsMap[activePreset];
+    const noPreset = {
+      options: { ...base, systemInstruction: applyTone(base.systemInstruction, activeTone) },
+      presetMatched: false,
+      presetName: undefined,
+      presetDescription: undefined,
+      stripLeadingStateWord: false,
+    };
+
+    const fromPresetKey = (key, stripLeadingStateWord) => {
+      const p = presetsMap[key];
+      if (!p) return noPreset;
       const systemInstructionRaw = p.systemInstruction ?? p.system_instruction;
       const systemInstruction =
         systemInstructionRaw != null && String(systemInstructionRaw).trim() !== ''
@@ -319,53 +342,33 @@ const ChatView = () => {
           stop: p.stop != null ? p.stop : undefined,
         },
         presetMatched: true,
-        presetName: activePreset,
+        presetName: key,
         presetDescription,
+        stripLeadingStateWord,
       };
-    }
-    if (!firstWord || !presetsMap || Object.keys(presetsMap).length === 0) {
-      return {
-        options: { ...base, systemInstruction: applyTone(base.systemInstruction, activeTone) },
-        presetMatched: false,
-        presetName: undefined,
-        presetDescription: undefined,
-      };
-    }
-    const key = Object.keys(presetsMap).find(
-      (k) => k.toLowerCase() === firstWord.toLowerCase()
-    );
-    if (!key) {
-      return {
-        options: { ...base, systemInstruction: applyTone(base.systemInstruction, activeTone) },
-        presetMatched: false,
-        presetName: undefined,
-        presetDescription: undefined,
-      };
-    }
-    const p = presetsMap[key];
-    const systemInstructionRaw = p.systemInstruction ?? p.system_instruction;
-    const systemInstruction =
-      systemInstructionRaw != null && String(systemInstructionRaw).trim() !== ''
-        ? String(systemInstructionRaw).trim()
-        : DEFAULT_SYSTEM_INSTRUCTION;
-    const descRaw = p.description ?? p.desc;
-    const presetDescription =
-      descRaw != null && String(descRaw).trim() !== '' ? String(descRaw).trim() : '';
-    return {
-      options: {
-        ...base,
-        systemInstruction: applyTone(systemInstruction, activeTone),
-        temperature: p.temperature != null ? p.temperature : 0.7,
-        maxTokens: clampOutputTokens(p.maxTokens != null ? p.maxTokens : DEFAULT_MAX_OUTPUT_TOKENS),
-        topP: p.topP != null ? p.topP : 0.95,
-        frequencyPenalty: p.frequencyPenalty != null ? p.frequencyPenalty : 0.0,
-        presencePenalty: p.presencePenalty != null ? p.presencePenalty : 0.3,
-        stop: p.stop != null ? p.stop : undefined,
-      },
-      presetMatched: true,
-      presetName: key,
-      presetDescription,
     };
+
+    const rawFirst = (message || '').trim().split(/\s+/)[0] || '';
+    const firstWord = rawFirst.replace(/\W/g, '');
+    const typedKey =
+      firstWord && presetsMap && Object.keys(presetsMap).length > 0
+        ? Object.keys(presetsMap).find((k) => k.toLowerCase() === firstWord.toLowerCase())
+        : undefined;
+    const dropdownKey = activePreset && presetsMap[activePreset] ? activePreset : null;
+
+    // Typed state word wins when enabled (default), otherwise dropdown wins if set.
+    if (typedStateOverrides) {
+      if (typedKey) return fromPresetKey(typedKey, true);
+      if (dropdownKey) return fromPresetKey(dropdownKey, false);
+      return noPreset;
+    }
+
+    if (dropdownKey) {
+      const strip = Boolean(typedKey && typedKey.toLowerCase() === dropdownKey.toLowerCase());
+      return fromPresetKey(dropdownKey, strip);
+    }
+    if (typedKey) return fromPresetKey(typedKey, true);
+    return noPreset;
   };
 
   useEffect(() => {
@@ -824,39 +827,41 @@ const ChatView = () => {
 
     try {
       let messageToSend = userMessage;
-      if (sessionOptionsRef.current === null) {
-        let presetsToUse = presets;
-        if (Object.keys(presetsToUse).length === 0 && window.electronAPI?.readPresets) {
-          const result = await window.electronAPI.readPresets();
-          if (result?.success && result.presets && Object.keys(result.presets).length > 0) {
-            presetsToUse = result.presets;
-            setPresets(result.presets);
-          }
+      // Resolve state per turn so typed trigger words aren't stuck on the previous dropdown value.
+      let presetsToUse = presets;
+      if (Object.keys(presetsToUse).length === 0 && window.electronAPI?.readPresets) {
+        const result = await window.electronAPI.readPresets();
+        if (result?.success && result.presets && Object.keys(result.presets).length > 0) {
+          presetsToUse = result.presets;
+          setPresets(result.presets);
         }
-        const result = getOptionsForMessage(userMessage, presetsToUse);
-        if (result.presetMatched) {
-          const trimmedMessage = (userMessage || '').trim();
-          const words = trimmedMessage.split(/\s+/);
-          messageToSend = words.slice(1).join(' ').trim();
-        }
-        if (result.presetMatched && result.presetName) {
-          setMessages((prev) => {
-            if (prev.length < 2) return prev;
-            const aiIdx = prev.length - 1;
-            const userIdx = prev.length - 2;
-            if (prev[aiIdx]?.id !== aiMessageId || prev[userIdx]?.sender !== 'user') return prev;
-            const next = [...prev];
-            next[userIdx] = {
-              ...next[userIdx],
-              presetName: result.presetName,
-              presetDescription: result.presetDescription ?? '',
-            };
-            return next;
-          });
-        }
-        sessionOptionsRef.current = { ...result, presetMatched: false };
       }
-      const options = sessionOptionsRef.current.options || sessionOptionsRef.current;
+      const result = getOptionsForMessage(userMessage, presetsToUse);
+      if (result.stripLeadingStateWord) {
+        const trimmedMessage = (userMessage || '').trim();
+        const words = trimmedMessage.split(/\s+/);
+        messageToSend = words.slice(1).join(' ').trim();
+      }
+      if (result.presetMatched && result.presetName) {
+        if (result.presetName !== activePreset) {
+          setActivePreset(result.presetName);
+        }
+        setMessages((prev) => {
+          if (prev.length < 2) return prev;
+          const aiIdx = prev.length - 1;
+          const userIdx = prev.length - 2;
+          if (prev[aiIdx]?.id !== aiMessageId || prev[userIdx]?.sender !== 'user') return prev;
+          const next = [...prev];
+          next[userIdx] = {
+            ...next[userIdx],
+            presetName: result.presetName,
+            presetDescription: result.presetDescription ?? '',
+          };
+          return next;
+        });
+      }
+      sessionOptionsRef.current = { options: result.options };
+      const options = result.options;
 
       setMessages(prev => prev.map(msg =>
         msg.id === aiMessageId ? { ...msg, text: '' } : msg
@@ -1023,20 +1028,6 @@ const ChatView = () => {
   };
   getAIResponseRef.current = getAIResponse;
 
-  useEffect(() => {
-    if (presetSyncedRef.current) return;
-    if (!presets || Object.keys(presets).length === 0) return;
-    const first = messages.find((m) => m.sender === 'user');
-    if (!first?.text) return;
-    const firstWord = (first.text.trim().split(/\s+/)[0] || '').replace(/\W/g, '');
-    if (!firstWord) return;
-    const key = Object.keys(presets).find((k) => k.toLowerCase() === firstWord.toLowerCase());
-    if (key) {
-      setActivePreset(key);
-      presetSyncedRef.current = true;
-    }
-  }, [presets, messages]);
-
   const startConversationFromPrompt = useCallback((initial) => {
     const text =
       typeof initial === 'string'
@@ -1056,7 +1047,6 @@ const ChatView = () => {
     pendingPromptRef.current = { text, files };
     bootstrappedAiRef.current = false;
     sessionOptionsRef.current = null;
-    presetSyncedRef.current = false;
     setIsLoading(false);
     setSubscriptionRequired(false);
     setAccountGateReason('');

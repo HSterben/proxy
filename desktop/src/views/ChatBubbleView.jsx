@@ -37,6 +37,7 @@ const ChatBubbleView = () => {
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [presets, setPresets] = useState({});
   const [activePreset, setActivePreset] = useState('');
+  const [typedStateOverrides, setTypedStateOverrides] = useState(true);
   const [stateMenuOpen, setStateMenuOpen] = useState(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -49,6 +50,16 @@ const ChatBubbleView = () => {
       api?.readPresets?.().then((result) => {
         if (result?.success && result.presets) setPresets(result.presets);
       });
+    });
+    return typeof unsub === 'function' ? unsub : undefined;
+  }, []);
+
+  useEffect(() => {
+    api?.getTypedStateOverrides?.()
+      .then((value) => setTypedStateOverrides(value !== false))
+      .catch(() => {});
+    const unsub = api?.onTypedStateOverridesChanged?.((value) => {
+      setTypedStateOverrides(value !== false);
     });
     return typeof unsub === 'function' ? unsub : undefined;
   }, []);
@@ -127,7 +138,15 @@ const ChatBubbleView = () => {
     setAttachedFiles([]);
 
     let text = messageText;
-    if (activePreset && messageText) {
+    const firstWord = (messageText.split(/\s+/)[0] || '').replace(/\W/g, '');
+    const typedIsState = Boolean(
+      firstWord &&
+        presetNames.some((name) => name.toLowerCase() === firstWord.toLowerCase()),
+    );
+    const shouldPrependDropdown =
+      Boolean(activePreset) && !(typedStateOverrides && typedIsState);
+
+    if (shouldPrependDropdown && messageText) {
       text = `${activePreset} ${messageText}`;
     } else if (activePreset && !messageText) {
       text = activePreset;

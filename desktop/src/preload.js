@@ -63,6 +63,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('max-context-tokens-changed', handler);
     return () => ipcRenderer.removeListener('max-context-tokens-changed', handler);
   },
+  getTypedStateOverrides: () => ipcRenderer.invoke('get-typed-state-overrides'),
+  setTypedStateOverrides: (enabled) => ipcRenderer.invoke('set-typed-state-overrides', enabled),
+  onTypedStateOverridesChanged: (callback) => {
+    const handler = (_event, value) => callback(value);
+    ipcRenderer.on('typed-state-overrides-changed', handler);
+    return () => ipcRenderer.removeListener('typed-state-overrides-changed', handler);
+  },
   getWindowSize: () => ipcRenderer.invoke('get-window-size'),
   setWindowSize: (size) => ipcRenderer.invoke('set-window-size', size),
   getWindowPosition: () => ipcRenderer.invoke('get-window-position'),

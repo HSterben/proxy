@@ -98,6 +98,7 @@ export default function SettingsView() {
   const [windowPosition, setWindowPosition] = useState("bottom-right");
   const [presetsPath, setPresetsPath] = useState("");
   const [runOnStartup, setRunOnStartup] = useState(false);
+  const [typedStateOverrides, setTypedStateOverrides] = useState(true);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [usageDataEnabled, setUsageDataEnabled] = useState(false);
   const [message, setMessage] = useState(null);
@@ -109,7 +110,7 @@ export default function SettingsView() {
   const loadSettings = async () => {
     if (!api) return;
     try {
-      const [kb, size, pos, path, startup, token, version] = await Promise.all([
+      const [kb, size, pos, path, startup, token, version, typedOverrides] = await Promise.all([
         api.getKeybind(),
         api.getWindowSize(),
         api.getWindowPosition(),
@@ -117,6 +118,7 @@ export default function SettingsView() {
         api.getRunOnStartup?.() ?? Promise.resolve(false),
         api.getAuthToken?.() ?? Promise.resolve(null),
         api.getAppVersion?.() ?? Promise.resolve(""),
+        api.getTypedStateOverrides?.() ?? Promise.resolve(true),
       ]);
       setKeybind(kb || "");
       setWindowSize(size || "Regular");
@@ -125,6 +127,7 @@ export default function SettingsView() {
       setRunOnStartup(Boolean(startup));
       setSignedIn(Boolean(token));
       setAppVersion(version || "");
+      setTypedStateOverrides(typedOverrides !== false);
     } catch (e) {
       console.error(e);
     }
@@ -245,6 +248,16 @@ export default function SettingsView() {
     });
   };
 
+  const handleTypedStateOverridesChange = (e) => {
+    const enabled = e.target.checked;
+    setTypedStateOverrides(enabled);
+    api?.setTypedStateOverrides?.(enabled).then((result) => {
+      if (result && !result.success) {
+        showMessage(result.error || "Couldn’t update state override setting", true);
+      }
+    });
+  };
+
   const handleClose = () => api?.closeWindow?.();
 
   if (!api) {
@@ -285,6 +298,12 @@ export default function SettingsView() {
                 hint="Starts PROXY in the background when you log into Windows"
                 checked={runOnStartup}
                 onChange={handleRunOnStartupChange}
+              />
+              <ToggleRow
+                label="Typed state overrides dropdown"
+                hint="If you type a state word first (e.g. Summarize), use that instead of the selected dropdown state"
+                checked={typedStateOverrides}
+                onChange={handleTypedStateOverridesChange}
               />
               <div className="settings-row">
                 <div>

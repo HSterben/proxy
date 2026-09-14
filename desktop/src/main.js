@@ -87,6 +87,8 @@ const WINDOW_POSITION_KEY = "windowPosition";
 const THEME_KEY = "theme";
 const MAX_CONTEXT_TOKENS_KEY = "maxContextTokens";
 const DEFAULT_MAX_CONTEXT_TOKENS = 12000;
+const TYPED_STATE_OVERRIDES_KEY = "typedStateOverridesDropdown";
+const DEFAULT_TYPED_STATE_OVERRIDES = true;
 
 const SIZE_PRESETS = {
   XSmall: 0.08,
@@ -1118,6 +1120,22 @@ ipcMain.handle("set-max-context-tokens", async (_e, value) => {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (!win.isDestroyed()) {
       win.webContents.send("max-context-tokens-changed", next);
+    }
+  });
+  return { success: true, value: next };
+});
+
+ipcMain.handle("get-typed-state-overrides", async () => {
+  const stored = configStore.get(TYPED_STATE_OVERRIDES_KEY);
+  return stored === undefined || stored === null ? DEFAULT_TYPED_STATE_OVERRIDES : Boolean(stored);
+});
+
+ipcMain.handle("set-typed-state-overrides", async (_e, enabled) => {
+  const next = Boolean(enabled);
+  configStore.set(TYPED_STATE_OVERRIDES_KEY, next);
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) {
+      win.webContents.send("typed-state-overrides-changed", next);
     }
   });
   return { success: true, value: next };
