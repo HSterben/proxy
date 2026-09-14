@@ -109,7 +109,7 @@ export const faqs = [
   {
     question: 'What is PROXY?',
     answer:
-      'PROXY is a fast, customizable AI chat assistant for Windows and the web. You shape replies with reusable “states” — named triggers that carry instructions — so you are not rewriting the same system prompt every time.',
+      'PROXY is a fast, customizable AI chat assistant for Windows and the web. You shape replies with reusable “states”, named triggers that carry instructions, so you are not rewriting the same system prompt every time.',
   },
   {
     question: 'What is a PROXY state?',

@@ -33,7 +33,7 @@ export default function About() {
             </h1>
             <p className="mt-6 max-w-[52ch] text-lg text-ink/55">
               PROXY helps you chat with AI using named setups you reuse. Instead of pasting a long
-              system prompt every time, you activate a state by name — on Windows or in the browser —
+              system prompt every time, you activate a state by name, on Windows or in the browser —
               with one PROXY account.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">

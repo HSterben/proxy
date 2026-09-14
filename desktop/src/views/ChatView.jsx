@@ -250,7 +250,7 @@ const ChatView = () => {
         const owner = await window.electronAPI?.getPresetsOwner?.();
         const subject = subjectFromAccessToken(authToken);
         if (subject && owner && subject !== owner) {
-          // Different account than the local cache — force replace.
+          // Different account than the local cache, force replace.
         }
         const cloud = await pullCloudStatesToDisk({
           token: authToken,

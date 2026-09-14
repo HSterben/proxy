@@ -198,7 +198,7 @@ export function jsonLdForPath(pathname: string) {
         '@type': 'ContactPage',
         '@id': `${absoluteUrl('/contact')}#contact`,
         url: absoluteUrl('/contact'),
-        name: `Contact — ${SITE_NAME}`,
+        name: `Contact, ${SITE_NAME}`,
         isPartOf: { '@id': WEBSITE_ID },
         mainEntity: { '@id': ORG_ID },
       },

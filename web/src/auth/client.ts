@@ -69,7 +69,7 @@ export async function switchWorkosAccount(state?: { returnTo?: string }) {
       returnTo: workosLogoutReturnTo(state?.returnTo || '/account'),
     })
   } catch {
-    // Already signed out — continue to account picker.
+    // Already signed out, continue to account picker.
   }
 
   window.localStorage.removeItem(REFRESH_TOKEN_KEY)
