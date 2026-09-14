@@ -310,8 +310,19 @@ export default function PresetsView() {
               presets = cloud.states;
               libraryMeta = cloud.library || null;
               cloudLoaded = true;
-              // Sync to disk without notifying windows (avoids reload loops)
-              await api.writePresets?.(presets, { broadcast: false });
+              await api.writePresets?.(presets, { broadcast: true });
+              const subject = (() => {
+                try {
+                  const parts = String(token).split('.');
+                  if (parts.length < 2) return null;
+                  const json = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+                  const payload = JSON.parse(json);
+                  return typeof payload.sub === 'string' ? payload.sub : null;
+                } catch {
+                  return null;
+                }
+              })();
+              if (subject) await api.setPresetsOwner?.(subject);
             }
           }
         }
@@ -555,7 +566,7 @@ export default function PresetsView() {
           });
           if (cloud?.states) {
             synced = cloud.states;
-            await api.writePresets?.(cloud.states, { broadcast: false });
+            await api.writePresets?.(cloud.states, { broadcast: true });
           }
           libraryMeta = cloud?.library || null;
         } else {

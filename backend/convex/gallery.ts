@@ -2,7 +2,6 @@ import { mutation, query } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import {
-  DEFAULT_STATES,
   DEFAULT_STATE_TAGS,
   OFFICIAL_AUTHOR_ID,
   OFFICIAL_AUTHOR_NAME,
@@ -15,6 +14,7 @@ import {
   resolveLibraryIds,
   resolveVisibility,
   stateValueValidator,
+  upsertOfficialDefaultStates,
   type Visibility,
 } from './states';
 import {
@@ -209,54 +209,7 @@ export const seedOfficialDefaults = mutation({
   args: {},
   returns: v.object({ upserted: v.number() }),
   handler: async (ctx) => {
-    const now = Date.now();
-    let upserted = 0;
-
-    for (const [name, value] of Object.entries(DEFAULT_STATES)) {
-      const existing = await ctx.db
-        .query('states')
-        .withIndex('by_official_key', (q) => q.eq('officialKey', name))
-        .first();
-
-      const description = value.description || name;
-      const state = normalizeState(value);
-      const tags = normalizeTags(DEFAULT_STATE_TAGS[name]);
-
-      if (existing) {
-        await ctx.db.patch(existing._id, {
-          name,
-          description,
-          state,
-          tags,
-          visibility: 'public',
-          authorWorkosId: OFFICIAL_AUTHOR_ID,
-          authorDisplayName: OFFICIAL_AUTHOR_NAME,
-          isOfficial: true,
-          officialKey: name,
-          updatedAt: now,
-          starCount: existing.starCount ?? 0,
-          saveCount: existing.saveCount ?? 0,
-        });
-      } else {
-        await ctx.db.insert('states', {
-          name,
-          description,
-          authorWorkosId: OFFICIAL_AUTHOR_ID,
-          authorDisplayName: OFFICIAL_AUTHOR_NAME,
-          state,
-          tags,
-          visibility: 'public',
-          saveCount: 0,
-          starCount: 0,
-          isOfficial: true,
-          officialKey: name,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-      upserted += 1;
-    }
-
+    const upserted = await upsertOfficialDefaultStates(ctx);
     return { upserted };
   },
 });

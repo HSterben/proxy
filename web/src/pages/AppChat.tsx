@@ -215,6 +215,8 @@ export default function AppChat() {
   const conversationContext = useRef<{ text: string; sender: string; images?: string[] }[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const wasLoadingRef = useRef(false)
 
   useEffect(() => {
     document.title = 'PROXY Web'
@@ -510,6 +512,14 @@ export default function AppChat() {
     const scroller = el.closest('.chat-messages')
     if (scroller) scroller.scrollTop = scroller.scrollHeight
   }, [messages])
+
+  // Return focus on the input
+  useEffect(() => {
+    if (wasLoadingRef.current && !isLoading) {
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+    wasLoadingRef.current = isLoading
+  }, [isLoading])
 
   const fileToBase64 = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -1008,6 +1018,7 @@ export default function AppChat() {
             </svg>
           </button>
           <input
+            ref={inputRef}
             type="text"
             className="chat-input-field"
             placeholder="Message PROXY…"

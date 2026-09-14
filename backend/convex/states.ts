@@ -3,8 +3,12 @@ import type { Doc, Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import {
   DEFAULT_STATES,
+  DEFAULT_STATE_TAGS,
+  OFFICIAL_AUTHOR_ID,
+  OFFICIAL_AUTHOR_NAME,
   defaultStateNames,
   isDefaultStateName,
+  normalizeTags,
 } from './defaultStates';
 import {
   ensureUserFromIdentity,
@@ -127,6 +131,74 @@ async function officialIdByKey(
     if (row) map.set(key, row._id);
   }
   return map;
+}
+
+/** Keep official PROXY defaults aligned with DEFAULT_STATES (prompt / params). */
+export async function upsertOfficialDefaultStates(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+): Promise<number> {
+  const now = Date.now();
+  let upserted = 0;
+
+  for (const [name, value] of Object.entries(DEFAULT_STATES)) {
+    const existing = await ctx.db
+      .query('states')
+      .withIndex('by_official_key', (q: any) => q.eq('officialKey', name))
+      .first();
+
+    const description = value.description || name;
+    const state = normalizeState(value);
+    const tags = normalizeTags(DEFAULT_STATE_TAGS[name]);
+
+    if (existing) {
+      const prev = normalizeState(existing.state);
+      const sameInstruction =
+        instructionOf(prev) === instructionOf(state) &&
+        (prev.description || existing.description || '') === (state.description || description);
+      if (
+        sameInstruction &&
+        existing.name === name &&
+        existing.isOfficial &&
+        existing.officialKey === name
+      ) {
+        continue;
+      }
+      await ctx.db.patch(existing._id, {
+        name,
+        description,
+        state,
+        tags,
+        visibility: 'public',
+        authorWorkosId: OFFICIAL_AUTHOR_ID,
+        authorDisplayName: OFFICIAL_AUTHOR_NAME,
+        isOfficial: true,
+        officialKey: name,
+        updatedAt: now,
+        starCount: existing.starCount ?? 0,
+        saveCount: existing.saveCount ?? 0,
+      });
+    } else {
+      await ctx.db.insert('states', {
+        name,
+        description,
+        authorWorkosId: OFFICIAL_AUTHOR_ID,
+        authorDisplayName: OFFICIAL_AUTHOR_NAME,
+        state,
+        tags,
+        visibility: 'public',
+        saveCount: 0,
+        starCount: 0,
+        isOfficial: true,
+        officialKey: name,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    upserted += 1;
+  }
+
+  return upserted;
 }
 
 /** Official IDs a user should have in-library for their plan. */
@@ -559,6 +631,7 @@ export const ensureMyLibrary = mutation({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Authentication required');
+    await upsertOfficialDefaultStates(ctx);
     const user = await ensureUserFromIdentity(ctx, identity);
     const ids = await resolveLibraryIds(ctx, identity.subject, resolveDisplayName(user));
     return { count: ids.length };

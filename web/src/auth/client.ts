@@ -9,11 +9,20 @@ export function workosRedirectUri() {
   return import.meta.env.VITE_WORKOS_REDIRECT_URI || `${window.location.origin}/auth/callback`
 }
 
-/**
- * Cookie-based AuthKit sessions only stick across visits with a custom auth domain
- * (`VITE_WORKOS_API_HOSTNAME`). Without that, use devMode so the refresh token lives
- * in localStorage, same idea as “stay signed in” on a normal website.
- */
+/** Absolute same-origin URL for AuthKit signOut `returnTo` (must match WorkOS Logout redirect allowlist). */
+export function workosLogoutReturnTo(path = '/') {
+  try {
+    const url = new URL(path, window.location.origin)
+    if (url.origin !== window.location.origin) {
+      return `${window.location.origin}/`
+    }
+    return url.href
+  } catch {
+    return `${window.location.origin}/`
+  }
+}
+
+
 export function workosDevMode() {
   const override = import.meta.env.VITE_WORKOS_DEV_MODE
   if (override === 'true') return true
@@ -55,7 +64,10 @@ export async function switchWorkosAccount(state?: { returnTo?: string }) {
   const client = await getAuthClient()
 
   try {
-    await client.signOut({ navigate: false })
+    await client.signOut({
+      navigate: false,
+      returnTo: workosLogoutReturnTo(state?.returnTo || '/account'),
+    })
   } catch {
     // Already signed out — continue to account picker.
   }

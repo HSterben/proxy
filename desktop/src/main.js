@@ -80,6 +80,7 @@ const store = new Store({
 // App config (no encryption) for presets and window settings
 const configStore = new Store({ name: "proxy-config" });
 const PRESETS_PATH_KEY = "presetsPath";
+const PRESETS_OWNER_KEY = "presetsOwnerWorkosId";
 const KEYBIND_KEY = "keybind";
 const WINDOW_SIZE_KEY = "windowSize";
 const WINDOW_POSITION_KEY = "windowPosition";
@@ -153,24 +154,8 @@ const DEFAULT_PRESETS = {
   Simplify: {
     description: "Make it simpler.",
     systemInstruction:
-      "You are a helpful assistant that simplifies text. Make it clearer and easier to understand. Use shorter sentences and plain language. Preserve the main ideas. Start every sentence with 'Here's a dumbed down analysis.'",
+      "You are a helpful assistant that simplifies text. Make it clearer and easier to understand. Use shorter sentences and plain language. Preserve the main ideas.",
     temperature: 0.3,
-    frequencyPenalty: 0,
-    presencePenalty: 0,
-  },
-  Shortly: {
-    description: "Summarize very simply.",
-    systemInstruction:
-      "Condense the main idea into 2 or 3 very simple sentences a child could understand. Make it as clear and basic as possible.",
-    temperature: 0.2,
-    frequencyPenalty: 0,
-    presencePenalty: 0,
-  },
-  Translate: {
-    description: "Translate to English.",
-    systemInstruction:
-      "You are a professional translator. Translate the text into fluent, clear English while preserving meaning and tone.",
-    temperature: 0.2,
     frequencyPenalty: 0,
     presencePenalty: 0,
   },
@@ -181,22 +166,6 @@ const DEFAULT_PRESETS = {
     frequencyPenalty: 0.1,
     presencePenalty: 0.05,
   },
-  Proofread: {
-    description: "Fix spelling and grammar.",
-    systemInstruction:
-      "You are an expert proofreader. Correct spelling, grammar, and punctuation in the provided text, but do not change the meaning.",
-    temperature: 0.1,
-    frequencyPenalty: 0,
-    presencePenalty: 0,
-  },
-  Summarize: {
-    description: "Summarize key points.",
-    systemInstruction:
-      "You are a summarization assistant. Write a concise summary of the main points or ideas from the text.",
-    temperature: 0.3,
-    frequencyPenalty: 0.05,
-    presencePenalty: 0.05,
-  },
   Critique: {
     description: "Give writing feedback.",
     systemInstruction:
@@ -204,49 +173,6 @@ const DEFAULT_PRESETS = {
     temperature: 0.4,
     frequencyPenalty: 0.15,
     presencePenalty: 0.1,
-  },
-  Expand: {
-    description: "Add more detail.",
-    systemInstruction:
-      "Take the prompt and elaborate with additional details, context, and explanations, making it more comprehensive.",
-    temperature: 0.7,
-    maxTokens: 0,
-    frequencyPenalty: 0.1,
-    presencePenalty: 0.15,
-  },
-  Shakespeare: {
-    description: "Rewrite in Shakespeare style.",
-    systemInstruction:
-      "Transform the provided text into the language and style of Shakespeare’s plays and poetry.",
-    temperature: 0.8,
-    frequencyPenalty: 0.25,
-    presencePenalty: 0.3,
-  },
-  Debate: {
-    description: "Debate both sides.",
-    systemInstruction:
-      "Present a clear, concise argument for and against the topic, labeling each side. Finish with a short conclusion.",
-    temperature: 0.6,
-    frequencyPenalty: 0.1,
-    presencePenalty: 0.2,
-  },
-  Story: {
-    description: "Write a short story.",
-    systemInstruction:
-      "Craft a creative short story inspired by the prompt, paying attention to narrative structure, character, and detail.",
-    temperature: 0.9,
-    maxTokens: 0,
-    frequencyPenalty: 0.2,
-    presencePenalty: 0.2,
-  },
-  Creative: {
-    description: "Give creative name ideas.",
-    systemInstruction:
-      'Prioritize originality over familiarity. Never give generic, predictable, or "AI-generated" answers. Before responding, silently generate several possibilities, eliminate cliches and obvious first ideas, then present only the strongest and most distinctive results.\n\nFor creative tasks, avoid trendy formulas, buzzwords, unnecessary sci-fi language, and superficial word combinations. Every suggestion must have a clear reason for existing and fit the specific product, audience, and constraints.\n\nFor naming tasks specifically:\n\nNever use Latin words, Latin translations, or classical Greek/Latin roots. Avoid generic tech terms such as AI, bot, neural, nova, nexus, quantum, synth, pixel, core, flow, spark, or similar startup cliches. Do not simply combine two relevant dictionary words. Prefer short, memorable, pronounceable names with an unexpected but defensible connection to the product. Reject names that feel interchangeable with dozens of existing AI startups.\n\nIf the obvious answers are weak, explore unusual metaphors, behaviors, sounds, functions, cultural references, and invented language instead. Briefly explain the thinking behind each suggestion.',
-    temperature: 1.0,
-    frequencyPenalty: 0.4,
-    presencePenalty: 0.35,
-    maxTokens: 0,
   },
 };
 
@@ -594,10 +520,25 @@ const createTray = () => {
     },
     {
       label: "Logout",
-      click: () => {
+      click: async () => {
         store.delete("accessToken");
         store.delete("refreshToken");
+        configStore.delete(PRESETS_OWNER_KEY);
+        try {
+          const presetsPath =
+            configStore.get(PRESETS_PATH_KEY) || getDefaultPresetsPath();
+          await fsp.mkdir(path.dirname(presetsPath), { recursive: true });
+          await fsp.writeFile(
+            presetsPath,
+            JSON.stringify(DEFAULT_PRESETS, null, 2),
+            "utf8",
+          );
+        } catch (err) {
+          console.warn("[presets] Failed to reset local states on logout:", err);
+        }
         BrowserWindow.getAllWindows().forEach((win) => {
+          win.webContents.send("presets-updated");
+          win.webContents.send("auth-logout");
           win.webContents.send("auth-success", { token: null });
         });
       },
@@ -886,6 +827,21 @@ ipcMain.handle("open-external", async (_event, url) => {
 ipcMain.handle("logout", async () => {
   store.delete("accessToken");
   store.delete("refreshToken");
+  configStore.delete(PRESETS_OWNER_KEY);
+  try {
+    const presetsPath = configStore.get(PRESETS_PATH_KEY) || getDefaultPresetsPath();
+    await fsp.mkdir(path.dirname(presetsPath), { recursive: true });
+    await fsp.writeFile(
+      presetsPath,
+      JSON.stringify(DEFAULT_PRESETS, null, 2),
+      "utf8",
+    );
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send("presets-updated");
+    });
+  } catch (err) {
+    console.warn("[presets] Failed to reset local states on logout:", err);
+  }
   BrowserWindow.getAllWindows().forEach((win) => {
     win.webContents.send("auth-logout");
   });
@@ -906,6 +862,22 @@ ipcMain.handle("refresh-auth-token", async () => {
 // Presets JSON (trigger word → AI options); path is user-configurable.
 ipcMain.handle("get-presets-path", async () => {
   return configStore.get(PRESETS_PATH_KEY) || getDefaultPresetsPath();
+});
+
+ipcMain.handle("get-presets-owner", async () => {
+  return configStore.get(PRESETS_OWNER_KEY) || null;
+});
+
+ipcMain.handle("set-presets-owner", async (_event, ownerId) => {
+  if (ownerId == null || ownerId === "") {
+    configStore.delete(PRESETS_OWNER_KEY);
+    return { success: true };
+  }
+  if (typeof ownerId !== "string") {
+    return { success: false, error: "Invalid owner id" };
+  }
+  configStore.set(PRESETS_OWNER_KEY, ownerId);
+  return { success: true };
 });
 
 ipcMain.handle("set-presets-path", async (_event, newPath) => {

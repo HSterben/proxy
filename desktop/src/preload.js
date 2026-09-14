@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Presets JSON (word -> systemInstruction, temperature, etc.); path is user-configurable
   getPresetsPath: () => ipcRenderer.invoke('get-presets-path'),
+  getPresetsOwner: () => ipcRenderer.invoke('get-presets-owner'),
+  setPresetsOwner: (ownerId) => ipcRenderer.invoke('set-presets-owner', ownerId),
   setPresetsPath: (filePath) => ipcRenderer.invoke('set-presets-path', filePath),
   readPresets: () => ipcRenderer.invoke('read-presets'),
   getBundledPresetsPath: () => ipcRenderer.invoke('get-bundled-presets-path'),

@@ -1,9 +1,16 @@
 // View: Quick launch shortcut bubble
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import ProxyMark from '../components/ProxyMark';
+import {
+  FREE_DEFAULT_PRESETS,
+  pullCloudStatesToDisk,
+  resetLocalStatesToFreeDefaults,
+  subjectFromAccessToken,
+} from '../lib/syncCloudStates';
 import '../index.css';
 
 const api = typeof window !== 'undefined' ? window.electronAPI : null;
+const CLOUD_SYNC_MIN_MS = 8_000;
 
 function BubbleControls() {
   const hide = () => api?.hideWindow?.();
@@ -41,18 +48,109 @@ const ChatBubbleView = () => {
   const [stateMenuOpen, setStateMenuOpen] = useState(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const syncingRef = useRef(false);
+  const lastCloudSyncRef = useRef(0);
+  const presetsRef = useRef({});
+
+  const applyPresets = useCallback((next) => {
+    if (!next || typeof next !== 'object') return;
+    presetsRef.current = next;
+    setPresets(next);
+    setActivePreset((prev) => (prev && next[prev] ? prev : ''));
+  }, []);
+
+  const syncFromCloud = useCallback(async ({ force = false } = {}) => {
+    if (!api?.getAuthToken) return presetsRef.current;
+    if (syncingRef.current) return presetsRef.current;
+
+    const now = Date.now();
+    let mustForce = force;
+    try {
+      const token = await api.getAuthToken();
+      if (!token) {
+        const local = await api.readPresets?.();
+        if (local?.success && local.presets) applyPresets(local.presets);
+        return presetsRef.current;
+      }
+
+      const subject = subjectFromAccessToken(token);
+      const owner = await api.getPresetsOwner?.();
+      if (subject && owner && subject !== owner) mustForce = true;
+      if (!mustForce && now - lastCloudSyncRef.current < CLOUD_SYNC_MIN_MS) {
+        return presetsRef.current;
+      }
+
+      syncingRef.current = true;
+      const cloud = await pullCloudStatesToDisk({
+        token,
+        writePresets: api.writePresets,
+        setPresetsOwner: api.setPresetsOwner,
+      });
+      lastCloudSyncRef.current = Date.now();
+      if (cloud) {
+        applyPresets(cloud);
+      } else {
+        const local = await api.readPresets?.();
+        if (local?.success && local.presets) applyPresets(local.presets);
+      }
+      return presetsRef.current;
+    } catch (err) {
+      console.error('Bubble cloud state sync failed:', err);
+      return presetsRef.current;
+    } finally {
+      syncingRef.current = false;
+    }
+  }, [applyPresets]);
 
   useEffect(() => {
     api?.readPresets?.().then((result) => {
-      if (result?.success && result.presets) setPresets(result.presets);
+      if (result?.success && result.presets) applyPresets(result.presets);
     });
-    const unsub = api?.onPresetsUpdated?.(() => {
+    void syncFromCloud({ force: true });
+
+    const unsubPresets = api?.onPresetsUpdated?.(() => {
       api?.readPresets?.().then((result) => {
-        if (result?.success && result.presets) setPresets(result.presets);
+        if (result?.success && result.presets) applyPresets(result.presets);
       });
     });
-    return typeof unsub === 'function' ? unsub : undefined;
-  }, []);
+    const unsubAuth = api?.onAuthSuccess?.((data) => {
+      if (data?.token) void syncFromCloud({ force: true });
+      else {
+        void resetLocalStatesToFreeDefaults({
+          writePresets: api.writePresets,
+          setPresetsOwner: api.setPresetsOwner,
+        }).then((defaults) => applyPresets(defaults || FREE_DEFAULT_PRESETS));
+      }
+    });
+    const unsubLogout = api?.onAuthLogout?.(() => {
+      void resetLocalStatesToFreeDefaults({
+        writePresets: api.writePresets,
+        setPresetsOwner: api.setPresetsOwner,
+      }).then((defaults) => applyPresets(defaults || FREE_DEFAULT_PRESETS));
+    });
+
+    return () => {
+      unsubPresets?.();
+      unsubAuth?.();
+      unsubLogout?.();
+    };
+  }, [applyPresets, syncFromCloud]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void syncFromCloud({ force: false });
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void syncFromCloud({ force: false });
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [syncFromCloud]);
 
   useEffect(() => {
     api?.getTypedStateOverrides?.()
@@ -62,15 +160,6 @@ const ChatBubbleView = () => {
       setTypedStateOverrides(value !== false);
     });
     return typeof unsub === 'function' ? unsub : undefined;
-  }, []);
-
-  useEffect(() => {
-    const focusInput = () => {
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    };
-    focusInput();
-    window.addEventListener('focus', focusInput);
-    return () => window.removeEventListener('focus', focusInput);
   }, []);
 
   useEffect(() => {
@@ -133,6 +222,9 @@ const ChatBubbleView = () => {
     const messageText = message.trim();
     if (!messageText && attachedFiles.length === 0) return;
 
+    // Ensure trigger matching uses the account library, not a stale disk copy.
+    const latestPresets = (await syncFromCloud({ force: false })) || presets;
+
     const filesToSend = [...attachedFiles];
     setMessage('');
     setAttachedFiles([]);
@@ -141,7 +233,7 @@ const ChatBubbleView = () => {
     const firstWord = (messageText.split(/\s+/)[0] || '').replace(/\W/g, '');
     const typedIsState = Boolean(
       firstWord &&
-        presetNames.some((name) => name.toLowerCase() === firstWord.toLowerCase()),
+        Object.keys(latestPresets).some((name) => name.toLowerCase() === firstWord.toLowerCase()),
     );
     const shouldPrependDropdown =
       Boolean(activePreset) && !(typedStateOverrides && typedIsState);

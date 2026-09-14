@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { LoginRequiredError, type User } from '@workos-inc/authkit-js'
-import { getAuthClient, getAuthInitError, startWorkosSignIn, switchWorkosAccount, type AuthClient } from './client'
+import { getAuthClient, getAuthInitError, startWorkosSignIn, switchWorkosAccount, workosLogoutReturnTo, type AuthClient } from './client'
 import { claimSignupQuota } from './claimSignup'
 
 type AuthContextValue = {
@@ -55,11 +55,23 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       signOut: async (opts) => {
         const client = clientRef.current
         if (!client) return
+        const returnTo =
+          opts && 'returnTo' in opts && opts.returnTo
+            ? workosLogoutReturnTo(String(opts.returnTo))
+            : workosLogoutReturnTo('/')
         if (opts && 'navigate' in opts && opts.navigate === false) {
-          await client.signOut({ ...opts, navigate: false })
+          try {
+            await client.signOut({ ...opts, returnTo, navigate: false })
+          } catch {
+            // No session / already signed out
+          }
           return
         }
-        await client.signOut(opts)
+        try {
+          await client.signOut({ ...opts, returnTo })
+        } catch {
+          window.location.assign(returnTo)
+        }
       },
       getAccessToken: (opts) => clientRef.current?.getAccessToken(opts) ?? notReady(),
       getSignInUrl: (opts) => clientRef.current?.getSignInUrl(opts) ?? Promise.resolve(''),

@@ -14,6 +14,11 @@ import { userFacingError } from '../lib/userFacingError';
 import { AI_RESPONSE_MODE, fetchAiReply } from '../lib/aiResponseMode';
 import { normalizeAiMarkdown } from '../lib/aiMarkdown';
 import {
+  pullCloudStatesToDisk,
+  resetLocalStatesToFreeDefaults,
+  subjectFromAccessToken,
+} from '../lib/syncCloudStates';
+import {
   DEFAULT_MAX_CONTEXT_TOKENS,
   DEFAULT_MAX_OUTPUT_TOKENS,
   buildBudgetedMessages,
@@ -236,22 +241,26 @@ const ChatView = () => {
     }
   }, []);
 
-  // Prefer cloud states when signed in; migrate local → cloud on first login
+  // Prefer cloud states when signed in; keep local disk mirrored for bubble/chat.
   useEffect(() => {
     if (!isAuthenticated || !authToken) return undefined;
     let cancelled = false;
     (async () => {
       try {
-        try {
-          await convex.current.mutation(api.states.ensureMyLibrary, {});
-        } catch (migrateErr) {
-          console.warn('Library migrate skipped:', migrateErr);
+        const owner = await window.electronAPI?.getPresetsOwner?.();
+        const subject = subjectFromAccessToken(authToken);
+        if (subject && owner && subject !== owner) {
+          // Different account than the local cache — force replace.
         }
-        const cloud = await convex.current.query(api.states.getMyStates, {});
+        const cloud = await pullCloudStatesToDisk({
+          token: authToken,
+          writePresets: window.electronAPI?.writePresets,
+          setPresetsOwner: window.electronAPI?.setPresetsOwner,
+        });
         if (cancelled) return;
-        if (cloud?.states && Object.keys(cloud.states).length > 0) {
-          setPresets(cloud.states);
-          await window.electronAPI?.writePresets?.(cloud.states, { broadcast: false });
+        if (cloud) {
+          setPresets(cloud);
+          setActivePreset((prev) => (prev && cloud[prev] ? prev : null));
           return;
         }
         const local = await window.electronAPI?.readPresets?.();
@@ -284,9 +293,12 @@ const ChatView = () => {
             o.visibility = 'private';
             sanitized[name] = o;
           }
-          setPresets(Object.keys(sanitized).length > 0 ? sanitized : local.presets);
+          const next = Object.keys(sanitized).length > 0 ? sanitized : local.presets;
+          setPresets(next);
           if (Object.keys(sanitized).length > 0) {
             await convex.current.mutation(api.states.saveMyStates, { states: sanitized });
+            await window.electronAPI?.writePresets?.(sanitized, { broadcast: true });
+            await window.electronAPI?.setPresetsOwner?.(subject);
           }
         }
       } catch (err) {
@@ -409,8 +421,21 @@ const ChatView = () => {
         setIsAuthenticated(true);
       } else {
         setAuthToken(null);
-        convex.current.clearAuth();
+        try {
+          convex.current.clearAuth();
+        } catch (_) {
+          convex.current.setAuth(async () => null);
+        }
         setIsAuthenticated(false);
+        void resetLocalStatesToFreeDefaults({
+          writePresets: window.electronAPI?.writePresets,
+          setPresetsOwner: window.electronAPI?.setPresetsOwner,
+        }).then((defaults) => {
+          if (defaults) {
+            setPresets(defaults);
+            setActivePreset(null);
+          }
+        });
       }
     });
     const unsubError = window.electronAPI.onAuthError?.((data) => {
@@ -425,6 +450,15 @@ const ChatView = () => {
         convex.current.setAuth(async () => null);
       }
       setIsAuthenticated(false);
+      void resetLocalStatesToFreeDefaults({
+        writePresets: window.electronAPI?.writePresets,
+        setPresetsOwner: window.electronAPI?.setPresetsOwner,
+      }).then((defaults) => {
+        if (defaults) {
+          setPresets(defaults);
+          setActivePreset(null);
+        }
+      });
     });
     return () => {
       unsubSuccess?.();
@@ -862,13 +896,13 @@ const ChatView = () => {
 
     try {
       let messageToSend = userMessage;
-      // Resolve state per turn so typed trigger words aren't stuck on the previous dropdown value.
+      // Always prefer the on-disk mirror (kept in sync with the signed-in account).
       let presetsToUse = presets;
-      if (Object.keys(presetsToUse).length === 0 && window.electronAPI?.readPresets) {
-        const result = await window.electronAPI.readPresets();
-        if (result?.success && result.presets && Object.keys(result.presets).length > 0) {
-          presetsToUse = result.presets;
-          setPresets(result.presets);
+      if (window.electronAPI?.readPresets) {
+        const disk = await window.electronAPI.readPresets();
+        if (disk?.success && disk.presets && Object.keys(disk.presets).length > 0) {
+          presetsToUse = disk.presets;
+          setPresets(disk.presets);
         }
       }
       const result = getOptionsForMessage(userMessage, presetsToUse);
