@@ -93,4 +93,17 @@ export default defineSchema({
   })
     .index('by_user_state', ['workosId', 'stateId'])
     .index('by_state', ['stateId']),
+
+  /**
+   * IP-hashed signup claims for free-tier anti-spam.
+   * Max 2 new accounts per IP hash per UTC day.
+   */
+  signupClaims: defineTable({
+    workosId: v.string(),
+    ipHash: v.string(),
+    dayKey: v.string(),
+    createdAt: v.number(),
+  })
+    .index('by_workos_id', ['workosId'])
+    .index('by_ip_day', ['ipHash', 'dayKey']),
 });

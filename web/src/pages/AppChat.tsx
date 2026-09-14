@@ -6,6 +6,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { ConvexClient } from 'convex/browser'
 import { useAuth } from '../auth/AuthSessionProvider'
+import { claimSignupQuota } from '../auth/claimSignup'
 import { api } from '../convex/api'
 import { convexSiteUrl, convexUrl } from '../lib/convexUrls'
 import { AI_RESPONSE_MODE, fetchAiReply } from '../lib/aiResponseMode'
@@ -277,10 +278,28 @@ export default function AppChat() {
     if (user) fetchStripePlans()
   }, [user, fetchStripePlans])
 
-  const hasActiveSubscription = useCallback(async () => {
+  const hasChatAccess = useCallback(async () => {
+    try {
+      await convex.current.mutation(api.signupRateLimit.ensureMyFreeUsage, {})
+    } catch (err) {
+      console.warn('[signup] ensureMyFreeUsage:', err)
+    }
+    try {
+      await claimSignupQuota(() => getAccessToken(), user?.id)
+    } catch (err) {
+      console.warn('[signup] claim:', err)
+    }
     const account = await convex.current.query(api.account.getMyAccount, {})
-    return { active: Boolean(account?.subscriptionActive) }
-  }, [])
+    return {
+      ok: Boolean(account?.canUseAI),
+      blockReason: account?.blockReason ?? null,
+      subscriptionActive: Boolean(account?.subscriptionActive),
+      remaining: account?.remaining ?? 0,
+      canCreateStates: Boolean(account?.canCreateStates),
+      canPublishStates: Boolean(account?.canPublishStates),
+      freeStateNames: account?.freeStateNames ?? ['Simplify', 'List', 'Critique'],
+    }
+  }, [getAccessToken, user?.id])
 
   const startCheckout = async (priceId: string | null) => {
     if (!priceId) return
@@ -400,13 +419,13 @@ export default function AppChat() {
 
   const getAIResponse = async (userMessage: string, files: AttachedFile[] = []) => {
     try {
-      const sub = await hasActiveSubscription()
-      if (!sub.active) {
+      const access = await hasChatAccess()
+      if (!access.ok) {
         setSubscriptionRequired(true)
         return
       }
     } catch (error) {
-      console.error('Error checking subscription:', error)
+      console.error('Error checking account:', error)
       setSubscriptionRequired(true)
       return
     }
@@ -785,8 +804,11 @@ export default function AppChat() {
     return shell(
       <div className="chat-auth-container">
         <div className="chat-auth-content">
-          <h2>Active plan required</h2>
-          <p>Subscribe on the billing page to chat on PROXY Web and Windows.</p>
+          <h2>Out of free tokens</h2>
+          <p>
+            Free accounts include 30,000 weighted tokens (lifetime). Subscribe to keep chatting on
+            PROXY Web and Windows.
+          </p>
           <button
             className="chat-login-button"
             type="button"
@@ -939,32 +961,30 @@ export default function AppChat() {
         </div>
       ) : null}
 
-      {attachedFiles.length > 0 ? (
-        <div className="chat-attachments">
-          {attachedFiles.map((fileData, idx) => (
-            <div key={idx} className="chat-attachment-item">
-              {fileData.type.startsWith('image/') ? (
-                <img src={fileData.dataUrl} alt={fileData.name} className="attachment-preview" />
-              ) : (
-                <div className="attachment-pdf-icon">PDF</div>
-              )}
-              <span className="attachment-name" title={fileData.name}>
-                {fileData.name.length > 15 ? `${fileData.name.substring(0, 15)}...` : fileData.name}
-              </span>
-              <button
-                type="button"
-                className="attachment-remove"
-                onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                aria-label="Remove attachment"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
       <form className="chat-input-container" onSubmit={(e) => void handleSubmit(e)}>
+        {attachedFiles.length > 0 ? (
+          <div className="chat-attachments" aria-label="Attachments">
+            {attachedFiles.map((fileData, idx) => (
+              <div key={idx} className="chat-attachment-item">
+                {fileData.type.startsWith('image/') ? (
+                  <img src={fileData.dataUrl} alt={fileData.name} className="attachment-preview" />
+                ) : (
+                  <div className="attachment-pdf-icon" title={fileData.name}>
+                    PDF
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="attachment-remove"
+                  onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+                  aria-label={`Remove ${fileData.name}`}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <input
           type="file"
           ref={fileInputRef}

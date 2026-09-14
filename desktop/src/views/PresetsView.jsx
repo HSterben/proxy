@@ -249,6 +249,8 @@ export default function PresetsView() {
   const [saving, setSaving] = useState(false);
   const [signedIn, setSignedIn] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
+  const [canCreateStates, setCanCreateStates] = useState(true);
+  const [canPublishStates, setCanPublishStates] = useState(true);
 
   const showMessage = useCallback((text, isError = false) => {
     setMessage({ text, isError });
@@ -289,6 +291,13 @@ export default function PresetsView() {
         setSignedIn(Boolean(token));
         if (token) {
           convex.current.setAuth(async () => (await api.getAuthToken?.()) ?? token);
+          try {
+            const account = await convex.current.query(convexApi.account.getMyAccount, {});
+            setCanCreateStates(Boolean(account?.canCreateStates));
+            setCanPublishStates(Boolean(account?.canPublishStates));
+          } catch (accountErr) {
+            console.warn("Account entitlements unavailable:", accountErr);
+          }
           if (source === "manual" || source === "init" || source === "auth") {
             try {
               await convex.current.mutation(convexApi.states.ensureMyLibrary, {});
@@ -474,6 +483,10 @@ export default function PresetsView() {
   };
 
   const addEntry = () => {
+    if (!canCreateStates) {
+      showMessage("Subscribe to PROXY to create custom states.", true);
+      return;
+    }
     const names = entries.map((e) => e.name);
     setEntries((prev) => [...prev, { ...emptyEntry(), name: uniqueNewName(names) }]);
   };
@@ -598,7 +611,9 @@ export default function PresetsView() {
               <p className="settings-hint">
                 {dirty ? "Unsaved edits · " : ""}
                 In chat, put the trigger word first, for example <code>Simplify hello</code>.
-                New states stay private until you turn on Make public.
+                {canPublishStates
+                  ? " New states stay private until you turn on Make public."
+                  : " Free accounts can use Simplify, List, and Critique. Subscribe to create or publish states."}
               </p>
             </div>
           </div>
@@ -698,7 +713,7 @@ export default function PresetsView() {
                 aria-label="Instructions"
               />
 
-              {canEditVisibility(entry) ? (
+              {canEditVisibility(entry) && canPublishStates ? (
                 <label className="preset-visibility">
                   <input
                     type="checkbox"
@@ -722,6 +737,8 @@ export default function PresetsView() {
                     <span className="preset-visibility-title">
                       {entry.isOfficial
                         ? "Official PROXY state"
+                        : !canPublishStates
+                          ? "Publishing requires a subscription"
                         : entry.visibility === "public"
                           ? "Public (from gallery)"
                           : "Private"}
@@ -729,6 +746,8 @@ export default function PresetsView() {
                     <span className="preset-visibility-hint">
                       {entry.isOfficial
                         ? "Built-in PROXY states stay public. You can’t change visibility."
+                        : !canPublishStates
+                          ? "Free accounts can use Simplify, List, and Critique. Subscribe to publish."
                         : "Only the owner can change public or private for this state."}
                     </span>
                   </span>
@@ -811,7 +830,13 @@ export default function PresetsView() {
 
       {!loading && (
         <div className="presets-footer">
-          <button type="button" className="btn-secondary" onClick={addEntry}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={addEntry}
+            disabled={!canCreateStates}
+            title={canCreateStates ? undefined : "Subscribe to create custom states"}
+          >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path d="M12 5v14M5 12h14" />
             </svg>

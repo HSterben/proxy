@@ -1,7 +1,15 @@
 import { action, query } from './_generated/server';
 import { v } from 'convex/values';
 import { api, internal } from './_generated/api';
-import { DEFAULT_PLAN_ID, isSubscriptionActive, quotaForPlan } from './plans';
+import {
+  DEFAULT_PLAN_ID,
+  FREE_STATE_NAMES,
+  FREE_WEIGHTED_TOKEN_LIMIT,
+  isSubscriptionActive,
+  quotaForPlan,
+  resolvePlanId,
+} from './plans';
+import { freeUserPassesSignupGate } from './signupRateLimit';
 
 const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -23,7 +31,7 @@ async function findSubscriptionForIdentity(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ctx: { db: any },
   workosId: string,
-  email?: string | null
+  email?: string | null,
 ): Promise<SubRow | null> {
   const byWorkos = await ctx.db
     .query('subscriptions')
@@ -55,9 +63,17 @@ export const getMyAccount = query({
       weightedTokenLimit: v.number(),
       remaining: v.number(),
       canUseAI: v.boolean(),
+      blockReason: v.union(
+        v.literal('usage_limit_reached'),
+        v.literal('signup_rate_limited'),
+        v.null(),
+      ),
+      canCreateStates: v.boolean(),
+      canPublishStates: v.boolean(),
+      freeStateNames: v.array(v.string()),
       websiteUrl: v.string(),
     }),
-    v.null()
+    v.null(),
   ),
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -78,17 +94,36 @@ export const getMyAccount = query({
       .first();
 
     const subscriptionActive = isSubscriptionActive(sub?.status);
-    const plan = sub?.plan ?? (subscriptionActive ? DEFAULT_PLAN_ID : null);
-    const defaultLimit = quotaForPlan(plan);
+    const plan = resolvePlanId(sub?.plan, subscriptionActive);
+    const defaultLimit = quotaForPlan(plan, subscriptionActive);
 
     let weightedTokensUsed = 0;
-    let weightedTokenLimit = usageRow?.weightedTokenLimit ?? defaultLimit;
-    if (usageRow && !periodExpired(usageRow.usagePeriodStart, now)) {
-      weightedTokensUsed = usageRow.weightedTokensUsed;
+    let weightedTokenLimit = defaultLimit;
+
+    if (usageRow) {
+      if (subscriptionActive && periodExpired(usageRow.usagePeriodStart, now)) {
+        weightedTokensUsed = 0;
+        weightedTokenLimit = usageRow.weightedTokenLimit || defaultLimit;
+      } else {
+        weightedTokensUsed = usageRow.weightedTokensUsed;
+        weightedTokenLimit = subscriptionActive
+          ? usageRow.weightedTokenLimit || defaultLimit
+          : Math.min(
+              usageRow.weightedTokenLimit || FREE_WEIGHTED_TOKEN_LIMIT,
+              FREE_WEIGHTED_TOKEN_LIMIT,
+            );
+      }
     }
 
     const remaining = Math.max(0, weightedTokenLimit - weightedTokensUsed);
-    const canUseAI = subscriptionActive && remaining > 0;
+    const signupOk =
+      subscriptionActive || (await freeUserPassesSignupGate(ctx, workosId));
+    const canUseAI = remaining > 0 && signupOk;
+    const blockReason = canUseAI
+      ? null
+      : !signupOk
+        ? ('signup_rate_limited' as const)
+        : ('usage_limit_reached' as const);
 
     return {
       email: identity.email,
@@ -100,6 +135,10 @@ export const getMyAccount = query({
       weightedTokenLimit,
       remaining,
       canUseAI,
+      blockReason,
+      canCreateStates: subscriptionActive,
+      canPublishStates: subscriptionActive,
+      freeStateNames: subscriptionActive ? [] : [...FREE_STATE_NAMES],
       websiteUrl,
     };
   },
@@ -179,7 +218,7 @@ export const syncMySubscription = action({
       if (sub.stripeSubscriptionId) {
         const resp = await fetch(
           `https://api.stripe.com/v1/subscriptions/${sub.stripeSubscriptionId}`,
-          { headers: { Authorization: `Bearer ${stripeKey}` } }
+          { headers: { Authorization: `Bearer ${stripeKey}` } },
         );
         stripeSub = await resp.json();
         if (!resp.ok) {
@@ -188,9 +227,9 @@ export const syncMySubscription = action({
       } else if (sub.stripeCustomerId) {
         const resp = await fetch(
           `https://api.stripe.com/v1/subscriptions?customer=${encodeURIComponent(
-            sub.stripeCustomerId
+            sub.stripeCustomerId,
           )}&status=all&limit=1`,
-          { headers: { Authorization: `Bearer ${stripeKey}` } }
+          { headers: { Authorization: `Bearer ${stripeKey}` } },
         );
         const data = await resp.json();
         if (!resp.ok) {

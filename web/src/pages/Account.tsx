@@ -17,6 +17,9 @@ type AccountSnapshot = {
   weightedTokenLimit: number
   remaining: number
   canUseAI: boolean
+  canCreateStates?: boolean
+  canPublishStates?: boolean
+  freeStateNames?: string[]
 }
 
 type MyProfile = {
@@ -699,13 +702,17 @@ export default function Account() {
               <div className="flex justify-between gap-4 border-b border-hairline pb-3">
                 <dt className="text-ink/50">Status</dt>
                 <dd className="capitalize">
-                  {account?.status === 'none' ? 'Not subscribed' : account?.status}
+                  {account?.subscriptionActive
+                    ? account.status
+                    : account?.status === 'none'
+                      ? 'Free'
+                      : account?.status}
                 </dd>
               </div>
               {account?.plan && (
                 <div className="flex justify-between gap-4 border-b border-hairline pb-3">
                   <dt className="text-ink/50">Plan</dt>
-                  <dd>{account.plan}</dd>
+                  <dd>{account.plan === 'free' ? 'Free' : account.plan}</dd>
                 </div>
               )}
               {account?.currentPeriodEnd && account.subscriptionActive && (
@@ -725,9 +732,16 @@ export default function Account() {
         </section>
 
         <section className="card p-6 md:p-8">
-          <h2 className="text-lg font-semibold">Usage this period</h2>
+          <h2 className="text-lg font-semibold">
+            {account?.subscriptionActive ? 'Usage this period' : 'Free lifetime usage'}
+          </h2>
           {account && (
             <>
+              <p className="mt-2 text-[14px] text-ink/55">
+                {account.subscriptionActive
+                  ? 'Monthly weighted-token allowance on your paid plan.'
+                  : '30,000 weighted tokens total on the free plan (no monthly reset). Subscribe for more.'}
+              </p>
               <dl className="mt-5 space-y-3 text-[15px]">
                 <div className="flex justify-between gap-4 border-b border-hairline pb-3">
                   <dt className="text-ink/50">Remaining</dt>

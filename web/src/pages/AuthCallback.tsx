@@ -1,34 +1,39 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthSessionProvider'
+import { claimSignupQuota } from '../auth/claimSignup'
 import './app/ChatView.css'
 
 export default function AuthCallback() {
-  const { user, isLoading, initError } = useAuth()
+  const { user, isLoading, initError, getAccessToken } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
     if (isLoading) return
-    if (user) {
+    if (!user) return
+
+    let cancelled = false
+    ;(async () => {
+      await claimSignupQuota(() => getAccessToken(), user.id)
+      if (cancelled) return
       const returnTo = sessionStorage.getItem('auth:returnTo') || '/account'
       sessionStorage.removeItem('auth:returnTo')
       navigate(returnTo, { replace: true })
+    })()
+
+    return () => {
+      cancelled = true
     }
-  }, [isLoading, user, navigate])
+  }, [isLoading, user, navigate, getAccessToken])
 
   return (
     <div className="chat-view">
       <div className="chat-auth-container">
         <div className="chat-auth-content">
-          {isLoading ? (
+          {isLoading || user ? (
             <>
               <div className="chat-loading-spinner" />
-              <p>Finishing sign-in…</p>
-            </>
-          ) : user ? (
-            <>
-              <div className="chat-loading-spinner" />
-              <p>Opening chat…</p>
+              <p>{user ? 'Opening…' : 'Finishing sign-in…'}</p>
             </>
           ) : (
             <>

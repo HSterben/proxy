@@ -1,7 +1,7 @@
 {
   "Simplify": {
     "description": "Make it simpler.",
-    "systemInstruction": "You are a helpful assistant that simplifies text. Make it clearer and easier to understand. Use shorter sentences and plain language. Preserve the main ideas. Start every sentence with 'Here's a dumbed down analysis.'",
+    "systemInstruction": "You are a helpful assistant that simplifies text. Make it clearer and easier to understand. Use shorter sentences and plain language. Preserve the main ideas.",
     "temperature": 0.3,
     "frequencyPenalty": 0,
     "presencePenalty": 0

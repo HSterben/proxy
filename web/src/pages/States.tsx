@@ -111,6 +111,7 @@ export default function States() {
   const [editMaxTokens, setEditMaxTokens] = useState('')
   const [editAdvanced, setEditAdvanced] = useState(false)
   const [editVisibility, setEditVisibility] = useState<Visibility>('private')
+  const [canPublishStates, setCanPublishStates] = useState(false)
   const reduceMotion = useReducedMotion()
 
   const myStateNames = useMemo(() => Object.keys(myStates).sort(), [myStates])
@@ -149,6 +150,7 @@ export default function States() {
     if (!user) {
       setMyStates({})
       setMyWorkosId(null)
+      setCanPublishStates(false)
       return
     }
     setMyWorkosId(user.id)
@@ -156,9 +158,13 @@ export default function States() {
     void (async () => {
       try {
         await convex.current.mutation(api.states.ensureMyLibrary, {})
-        const mine = await convex.current.query(api.states.getMyStates, {})
+        const [mine, account] = await Promise.all([
+          convex.current.query(api.states.getMyStates, {}),
+          convex.current.query(api.account.getMyAccount, {}),
+        ])
         if (mine?.states) setMyStates(mine.states as MyStatesMap)
         if (mine?.defaultNames) setDefaultNames(mine.defaultNames)
+        setCanPublishStates(Boolean(account?.canPublishStates))
       } catch {
         // not signed into Convex yet
       }
@@ -498,9 +504,21 @@ export default function States() {
             <div className="mt-6 flex flex-wrap gap-3">
               <button
                 type="button"
-                className="pressable inline-flex min-h-11 items-center rounded-[10px] bg-black px-5 text-[15px] font-semibold text-white"
+                className="pressable inline-flex min-h-11 items-center rounded-[10px] bg-black px-5 text-[15px] font-semibold text-white disabled:opacity-50"
+                disabled={Boolean(user) && !canPublishStates}
+                title={
+                  user && !canPublishStates
+                    ? 'Subscribe to create or publish states'
+                    : undefined
+                }
                 onClick={() => {
                   if (!ensureAuth()) return
+                  if (!canPublishStates) {
+                    setError(
+                      'Free accounts can use Simplify, List, and Critique. Subscribe to create or publish states.',
+                    )
+                    return
+                  }
                   setPublishOpen(true)
                 }}
               >
