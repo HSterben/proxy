@@ -1,6 +1,16 @@
 {
   "name": "PROXY",
   "short_name": "PROXY",
+  "description": "Fast customizable AI assistance. Named triggers that shape every reply.",
+  "id": "/",
+  "start_url": "/app",
+  "scope": "/",
+  "lang": "en-CA",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0e0e0e",
+  "background_color": "#0e0e0e",
+  "categories": ["productivity", "utilities"],
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",
@@ -13,9 +23,21 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
-  "theme_color": "#121212",
-  "background_color": "#121212",
-  "display": "standalone"
+  "screenshots": [
+    {
+      "src": "/og-preview.png",
+      "sizes": "1200x630",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "PROXY — Fast customizable AI assistance"
+    }
+  ]
 }

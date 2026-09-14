@@ -218,10 +218,6 @@ export default function AppChat() {
   const inputRef = useRef<HTMLInputElement>(null)
   const wasLoadingRef = useRef(false)
 
-  useEffect(() => {
-    document.title = 'PROXY Web'
-  }, [])
-
   const startSignIn = useCallback(() => {
     void signIn({ state: { returnTo: '/app' } })
   }, [signIn])

@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /auth/
+Disallow: /account
+Disallow: /account/
+
+Sitemap: https://getproxy.ca/sitemap.xml

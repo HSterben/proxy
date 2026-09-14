@@ -1,5 +1,6 @@
 import { Navigate, Routes, Route } from 'react-router-dom'
 import Layout from './components/layout/Layout'
+import DocumentMeta from './components/seo/DocumentMeta'
 import Home from './pages/Home'
 import About from './pages/About'
 import States from './pages/States'
@@ -13,21 +14,24 @@ import NotFound from './pages/NotFound'
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="app" element={<AppChat />} />
-      <Route path="auth/callback" element={<AuthCallback />} />
-      <Route element={<Layout />}>
-        <Route index element={<Home />} />
-        <Route path="account" element={<Account />} />
-        <Route path="account/billing" element={<Billing />} />
-        <Route path="u/:workosId" element={<Profile />} />
-        <Route path="about" element={<About />} />
-        <Route path="states" element={<States />} />
-        <Route path="blog" element={<Navigate to="/states" replace />} />
-        <Route path="blog/:slug" element={<Navigate to="/states" replace />} />
-        <Route path="contact" element={<Contact />} />
-        <Route path="*" element={<NotFound />} />
-      </Route>
-    </Routes>
+    <>
+      <DocumentMeta />
+      <Routes>
+        <Route path="app" element={<AppChat />} />
+        <Route path="auth/callback" element={<AuthCallback />} />
+        <Route element={<Layout />}>
+          <Route index element={<Home />} />
+          <Route path="account" element={<Account />} />
+          <Route path="account/billing" element={<Billing />} />
+          <Route path="u/:workosId" element={<Profile />} />
+          <Route path="about" element={<About />} />
+          <Route path="states" element={<States />} />
+          <Route path="blog" element={<Navigate to="/states" replace />} />
+          <Route path="blog/:slug" element={<Navigate to="/states" replace />} />
+          <Route path="contact" element={<Contact />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
+      </Routes>
+    </>
   )
 }
