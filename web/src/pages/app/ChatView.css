@@ -587,60 +587,75 @@
 
 .chat-attachments {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
-  padding: 0 24px 8px;
+  padding: 0 0 8px;
   flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .chat-attachment-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  width: 48px;
+  height: 48px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 12px;
-  max-width: 200px;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .attachment-preview {
-  width: 32px;
-  height: 32px;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 0;
+  display: block;
 }
 
 .attachment-pdf-icon {
-  width: 32px;
-  height: 32px;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--color-accent-primary);
+  background: var(--color-bg-hover);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .attachment-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: none;
 }
 
 .attachment-remove {
-  width: 20px;
-  height: 20px;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
   border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
 }
 
 .attachment-remove:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
+  color: #fff;
+  background: var(--color-danger, #c0392b);
 }
 
 .chat-file-input {
@@ -650,8 +665,9 @@
 .chat-input-container {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
   margin: 0 16px 16px;
   padding: 8px 10px 8px 12px;
   background: var(--color-bg-elevated);
@@ -668,8 +684,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
   min-width: 0;
+  width: 100%;
 }
 
 .chat-input-field {
@@ -1001,7 +1017,7 @@
   }
 
   .chat-attachments {
-    padding: 0 14px 8px;
+    padding: 0 0 8px;
   }
 
   .chat-input-container {

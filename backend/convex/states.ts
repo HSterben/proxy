@@ -10,6 +10,11 @@ import {
   ensureUserFromIdentity,
   resolveDisplayName,
 } from './users';
+import {
+  requireActiveSubscription,
+  userHasActiveSubscription,
+} from './entitlements';
+import { FREE_STATE_NAMES, isFreeStateName } from './plans';
 
 /** One chat "state" (preset) — flexible fields match desktop presets JSON. */
 export const stateValueValidator = v.object({
@@ -422,11 +427,14 @@ export const getMyStates = query({
     if (!identity) return null;
 
     const workosId = identity.subject;
+    const subscribed = await userHasActiveSubscription(ctx, workosId);
     let libraryIds = await listLibraryStateIds(ctx, workosId);
 
     if (libraryIds.length === 0) {
       const official = await officialIdByKey(ctx);
-      libraryIds = [...official.values()];
+      libraryIds = subscribed
+        ? [...official.values()]
+        : FREE_STATE_NAMES.map((n) => official.get(n)).filter(Boolean) as Id<'states'>[];
     }
 
     const states: Record<string, StateValue> = {};
@@ -434,6 +442,7 @@ export const getMyStates = query({
     for (const id of libraryIds) {
       const doc = await ctx.db.get(id);
       if (!doc) continue;
+      if (!subscribed && !isFreeStateName(doc.name)) continue;
       const visibility = resolveVisibility(doc);
       const state = {
         ...normalizeState(doc.state),
@@ -455,10 +464,41 @@ export const getMyStates = query({
       });
     }
 
+    // Guarantee free defaults are present even if library was empty/mis-seeded.
+    if (!subscribed) {
+      const official = await officialIdByKey(ctx);
+      for (const name of FREE_STATE_NAMES) {
+        if (states[name]) continue;
+        const id = official.get(name);
+        if (!id) continue;
+        const doc = await ctx.db.get(id);
+        if (!doc) continue;
+        const visibility = resolveVisibility(doc);
+        const state = {
+          ...normalizeState(doc.state),
+          visibility,
+          description:
+            normalizeState(doc.state).description ||
+            normalizeState(doc.state).desc ||
+            doc.description,
+        };
+        states[doc.name] = state;
+        library.push({
+          id: doc._id,
+          name: doc.name,
+          description: doc.description,
+          visibility,
+          isOfficial: Boolean(doc.isOfficial),
+          isOwner: false,
+          state,
+        });
+      }
+    }
+
     return {
       states,
       library,
-      defaultNames: defaultStateNames(),
+      defaultNames: subscribed ? defaultStateNames() : [...FREE_STATE_NAMES],
       updatedAt: undefined,
     };
   },
@@ -490,10 +530,30 @@ export const saveMyStates = mutation({
     if (!identity) throw new Error('Authentication required');
 
     const workosId = identity.subject;
+    const subscribed = await userHasActiveSubscription(ctx, workosId);
     const user = await ensureUserFromIdentity(ctx, identity);
     const displayName = resolveDisplayName(user);
     const now = Date.now();
-    const incoming = normalizeStates(args.states);
+    const incomingRaw = normalizeStates(args.states);
+    const incoming = subscribed
+      ? incomingRaw
+      : Object.fromEntries(
+          Object.entries(incomingRaw).filter(([name]) => isFreeStateName(name)),
+        );
+
+    if (!subscribed) {
+      for (const [name, value] of Object.entries(incomingRaw)) {
+        if (value.visibility === 'public') {
+          throw new Error('Subscribe to PROXY to publish states.');
+        }
+        if (!isFreeStateName(name)) {
+          throw new Error(
+            'Free accounts can only use Simplify, List, and Critique. Subscribe to create more states.',
+          );
+        }
+      }
+    }
+
     const official = await officialIdByKey(ctx);
 
     let previousIds = await resolveLibraryIds(ctx, workosId, displayName);
@@ -550,6 +610,15 @@ export const saveMyStates = mutation({
         }
       }
 
+      if (!subscribed) {
+        // Free: only official free-state refs — never create custom docs.
+        const officialId = official.get(key);
+        if (officialId && isFreeStateName(key)) {
+          nextIds.push(officialId);
+        }
+        continue;
+      }
+
       const existing = ownedByName.get(lower);
       if (existing) {
         await ctx.db.patch(existing._id, {
@@ -581,6 +650,14 @@ export const saveMyStates = mutation({
         description,
         value,
       });
+    }
+
+    // Ensure free users always keep the three default official states.
+    if (!subscribed) {
+      for (const name of FREE_STATE_NAMES) {
+        const id = official.get(name);
+        if (id && !nextIds.includes(id)) nextIds.push(id);
+      }
     }
 
     for (const item of pendingInserts) {
@@ -731,6 +808,13 @@ export const setMyStateVisibility = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Authentication required');
+    if (args.visibility === 'public') {
+      await requireActiveSubscription(
+        ctx,
+        identity.subject,
+        'publish states',
+      );
+    }
     const doc = await ctx.db.get(args.stateId);
     if (!doc) throw new Error('State not found');
     if (doc.isOfficial) throw new Error('Official states cannot change visibility');
@@ -756,6 +840,13 @@ export const addToLibrary = mutation({
     if (!doc) throw new Error('State not found');
     if (resolveVisibility(doc) !== 'public' && doc.authorWorkosId !== identity.subject) {
       throw new Error('This state is private');
+    }
+
+    const subscribed = await userHasActiveSubscription(ctx, identity.subject);
+    if (!subscribed && !isFreeStateName(doc.name)) {
+      throw new Error(
+        'Free accounts can only use Simplify, List, and Critique. Subscribe to save more states.',
+      );
     }
 
     const user = await ensureUserFromIdentity(ctx, identity);

@@ -22,6 +22,8 @@ import {
   resolveAvatarUrl,
   resolveDisplayName,
 } from './users';
+import { requireActiveSubscription, userHasActiveSubscription } from './entitlements';
+import { isFreeStateName } from './plans';
 
 const listItemValidator = v.object({
   _id: v.id('states'),
@@ -272,6 +274,12 @@ export const publish = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Sign in to create a state');
 
+    await requireActiveSubscription(
+      ctx,
+      identity.subject,
+      'create or publish states',
+    );
+
     const name = args.name.trim();
     if (!name || name.length > 64) throw new Error('Name must be 1–64 characters');
     const description = args.description.trim();
@@ -390,6 +398,13 @@ export const saveToMine = mutation({
       throw new Error('This state is private');
     }
 
+    const subscribed = await userHasActiveSubscription(ctx, identity.subject);
+    if (!subscribed && !isFreeStateName(post.name)) {
+      throw new Error(
+        'Free accounts can only use Simplify, List, and Critique. Subscribe to save more states.',
+      );
+    }
+
     const user = await ensureUserFromIdentity(ctx, identity);
     await resolveLibraryIds(ctx, identity.subject, resolveDisplayName(user));
     const added = await addLibraryMembership(ctx, identity.subject, stateId);
@@ -418,6 +433,12 @@ export const updatePublished = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Sign in required');
+
+    await requireActiveSubscription(
+      ctx,
+      identity.subject,
+      'edit or publish states',
+    );
 
     const stateId = args.stateId || args.communityStateId;
     if (!stateId) throw new Error('stateId required');

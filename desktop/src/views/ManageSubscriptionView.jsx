@@ -169,7 +169,11 @@ export default function ManageSubscriptionView() {
                 <div className="subscription-status-row">
                   <span className="subscription-status-label">Status</span>
                   <span className={`subscription-badge ${badgeClass}`}>
-                    {status === "none" ? "No active plan" : status.replace(/_/g, " ")}
+                    {account?.subscriptionActive
+                      ? status.replace(/_/g, " ")
+                      : status === "none"
+                        ? "Free"
+                        : status.replace(/_/g, " ")}
                   </span>
                 </div>
                 {account?.email && (
@@ -181,7 +185,9 @@ export default function ManageSubscriptionView() {
                 {account?.plan && (
                   <div className="subscription-status-row">
                     <span className="subscription-status-label">Plan</span>
-                    <span className="subscription-status-value">{account.plan}</span>
+                    <span className="subscription-status-value">
+                      {account.plan === "free" ? "Free" : account.plan}
+                    </span>
                   </div>
                 )}
                 {account?.currentPeriodEnd && account.subscriptionActive && (
@@ -195,7 +201,9 @@ export default function ManageSubscriptionView() {
                 {account && (
                   <div className="subscription-usage-block">
                     <div className="subscription-status-row">
-                      <span className="subscription-status-label">Usage this period</span>
+                      <span className="subscription-status-label">
+                        {account.subscriptionActive ? "Usage this period" : "Free lifetime usage"}
+                      </span>
                       <span className="subscription-status-value">
                         {formatQuota(account.weightedTokensUsed, account.weightedTokenLimit)}
                       </span>
@@ -206,13 +214,21 @@ export default function ManageSubscriptionView() {
                       aria-valuemin={0}
                       aria-valuemax={100}
                       aria-valuenow={usagePct}
-                      aria-label="Usage this period"
+                      aria-label={
+                        account.subscriptionActive ? "Usage this period" : "Free lifetime usage"
+                      }
                     >
                       <div
                         className={`subscription-usage-fill subscription-usage-fill-${usageTone}`}
                         style={{ width: `${usagePct}%` }}
                       />
                     </div>
+                    {!account.subscriptionActive && (
+                      <p className="settings-hint" style={{ marginTop: 8 }}>
+                        Free includes 30,000 weighted tokens (no monthly reset) and Simplify, List,
+                        and Critique. Subscribe for more tokens and custom states.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

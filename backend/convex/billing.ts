@@ -2,12 +2,15 @@ import { internalMutation } from './_generated/server';
 import { v } from 'convex/values';
 import {
   DEFAULT_PLAN_ID,
+  FREE_WEIGHTED_TOKEN_LIMIT,
   isSubscriptionActive,
   quotaForPlan,
 } from './plans';
 
 /**
  * After Stripe webhooks update subscription status, sync plan + quota on the user.
+ * Activating a paid plan starts a fresh monthly token period.
+ * Lapsing a plan clamps the limit back to the free lifetime pool (usage kept).
  */
 export const syncEntitlements = internalMutation({
   args: {
@@ -17,20 +20,19 @@ export const syncEntitlements = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    if (!isSubscriptionActive(args.status)) {
-      return null;
-    }
-
-    const plan = args.plan ?? DEFAULT_PLAN_ID;
-    const weightedTokenLimit = quotaForPlan(plan);
     const now = Date.now();
+    const active = isSubscriptionActive(args.status);
+    const plan = active ? (args.plan ?? DEFAULT_PLAN_ID) : 'free';
+    const weightedTokenLimit = active
+      ? quotaForPlan(plan, true)
+      : FREE_WEIGHTED_TOKEN_LIMIT;
 
     const sub = await ctx.db
       .query('subscriptions')
       .withIndex('by_workos_id', (q) => q.eq('workosId', args.workosId))
       .first();
 
-    if (sub && sub.plan !== plan) {
+    if (sub && active && sub.plan !== plan) {
       await ctx.db.patch(sub._id, { plan, updatedAt: now });
     }
 
@@ -52,12 +54,22 @@ export const syncEntitlements = internalMutation({
       return null;
     }
 
-    if (usage.weightedTokenLimit !== weightedTokenLimit) {
+    if (active) {
       await ctx.db.patch(usage._id, {
         weightedTokenLimit,
+        usagePeriodStart: now,
+        weightedTokensUsed: 0,
+        inputTokensUsed: 0,
+        outputTokensUsed: 0,
         updatedAt: now,
       });
+      return null;
     }
+
+    await ctx.db.patch(usage._id, {
+      weightedTokenLimit: FREE_WEIGHTED_TOKEN_LIMIT,
+      updatedAt: now,
+    });
 
     return null;
   },

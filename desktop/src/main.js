@@ -428,6 +428,15 @@ function handleAuthCallback(url) {
         }
         console.log("Token stored successfully");
 
+        // Bind free-tier signup to this network (idempotent; also claimed in Convex /auth/callback).
+        fetch(`${CONVEX_HTTP_URL}/auth/claim-signup`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        }).catch((err) => console.warn("[signup] claim-signup failed:", err));
+
         // Notify all windows of successful auth
         BrowserWindow.getAllWindows().forEach((win) => {
           win.webContents.send("auth-success", { token });

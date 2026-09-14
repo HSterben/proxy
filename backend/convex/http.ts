@@ -283,7 +283,7 @@ http.route({
 http.route({
   path: '/auth/callback',
   method: 'GET',
-  handler: httpAction(async (_, req) => {
+  handler: httpAction(async (ctx, req) => {
     const url = new URL(req.url);
     const code = url.searchParams.get('code');
     const error = url.searchParams.get('error');
@@ -385,6 +385,17 @@ http.route({
 
       const tokenData = await tokenResponse.json();
 
+      // Bind free-tier signup to client IP (max 2 accounts / IP / UTC day).
+      // Do not block login — rate-limited users can still subscribe.
+      try {
+        const claim = await claimSignupFromRequest(ctx, req, tokenData.user);
+        if (claim && 'ok' in claim && claim.ok === false && !('skipped' in claim)) {
+          console.warn('[signup] IP claim rejected:', claim);
+        }
+      } catch (claimErr) {
+        console.error('[signup] IP claim failed:', claimErr);
+      }
+
       if (isWeb) {
         const params = new URLSearchParams({
           token: tokenData.access_token,
@@ -429,6 +440,54 @@ http.route({
         500
       );
     }
+  }),
+});
+
+/**
+ * Bind the authenticated WorkOS user to the request IP for free-tier anti-spam.
+ * Used by web AuthKit (browser → WorkOS → site) where Convex never saw the OAuth redirect.
+ */
+http.route({
+  path: '/auth/claim-signup',
+  method: 'OPTIONS',
+  handler: httpAction(async () => corsOptions()),
+});
+
+http.route({
+  path: '/auth/claim-signup',
+  method: 'POST',
+  handler: httpAction(async (ctx, req) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return corsJson({ error: 'Authentication required' }, 401);
+    }
+
+    const ip = clientIpFromRequest(req);
+    // When Convex doesn't forward a client IP, still claim with a per-user hash so
+    // free quota is seeded — without consuming the shared IP rate-limit bucket.
+    const ipHash = ip
+      ? await hashIp(ip)
+      : `noip:${await hashIp(identity.subject)}`;
+    const nameParts = (identity.name || '').trim().split(/\s+/).filter(Boolean);
+    const result = await ctx.runMutation(internal.signupRateLimit.claimIpSignup, {
+      workosId: identity.subject,
+      ipHash,
+      email: identity.email ?? undefined,
+      firstName: identity.givenName ?? nameParts[0] ?? undefined,
+      lastName:
+        identity.familyName ??
+        (nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined),
+      profilePictureUrl: identity.pictureUrl ?? undefined,
+    });
+
+    if (!result.ok) {
+      return corsJson(
+        { error: result.reason, code: result.code },
+        429,
+      );
+    }
+
+    return corsJson({ ok: true, alreadyClaimed: result.alreadyClaimed });
   }),
 });
 
@@ -770,6 +829,84 @@ function corsOptions() {
   });
 }
 
+/** Best-effort client IP from CDN / proxy headers (never trust body-supplied IPs). */
+function clientIpFromRequest(req: Request): string | null {
+  const cf = req.headers.get('cf-connecting-ip')?.trim();
+  if (cf) return cf;
+  const xff = req.headers.get('x-forwarded-for');
+  if (xff) {
+    const first = xff.split(',')[0]?.trim();
+    if (first) return first;
+  }
+  const real = req.headers.get('x-real-ip')?.trim();
+  if (real) return real;
+  return null;
+}
+
+async function hashIp(ip: string): Promise<string> {
+  const data = new TextEncoder().encode(`proxy-signup-v1:${ip}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function claimSignupFromRequest(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: any,
+  req: Request,
+  workosUser: {
+    id?: string;
+    email?: string;
+    first_name?: string;
+    last_name?: string;
+    profile_picture_url?: string;
+  } | null | undefined,
+) {
+  const workosId = workosUser?.id?.trim();
+  if (!workosId) return { ok: false as const, skipped: true as const };
+
+  const ip = clientIpFromRequest(req);
+  if (!ip) {
+    console.warn('[signup] missing client IP for claim; using per-user fallback', workosId);
+  }
+  const ipHash = ip ? await hashIp(ip) : `noip:${await hashIp(workosId)}`;
+  return await ctx.runMutation(internal.signupRateLimit.claimIpSignup, {
+    workosId,
+    ipHash,
+    email: workosUser?.email,
+    firstName: workosUser?.first_name,
+    lastName: workosUser?.last_name,
+    profilePictureUrl: workosUser?.profile_picture_url,
+  });
+}
+
+/** Claim free-tier signup for an authenticated identity (AI / claim-signup routes). */
+async function claimSignupForIdentity(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: any,
+  req: Request,
+  identity: {
+    subject: string;
+    email?: string | null;
+    name?: string | null;
+    givenName?: string | null;
+    familyName?: string | null;
+    pictureUrl?: string | null;
+  },
+) {
+  const nameParts = (identity.name || '').trim().split(/\s+/).filter(Boolean);
+  return claimSignupFromRequest(ctx, req, {
+    id: identity.subject,
+    email: identity.email ?? undefined,
+    first_name: identity.givenName ?? nameParts[0],
+    last_name:
+      identity.familyName ??
+      (nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined),
+    profile_picture_url: identity.pictureUrl ?? undefined,
+  });
+}
+
 function processMessages(
   messages: ChatMessage[],
   systemInstruction?: string
@@ -827,10 +964,17 @@ const streamHandler = httpAction(async (ctx, req) => {
   const workosId = identity.subject;
 
   try {
+    // Bind free quota + IP signup claim before the usage gate (repairs missing usage rows).
+    try {
+      await claimSignupForIdentity(ctx, req, identity);
+    } catch (claimErr) {
+      console.error('[signup] claim before AI failed:', claimErr);
+    }
+
     const gate = await ctx.runQuery(internal.usage.assertCanUseAI, { workosId });
     if (gate.ok === false) {
-      const status = gate.code === 'subscription_required' ? 402 : 429;
-      return corsJson({ error: gate.reason, code: gate.code }, status);
+      // 402: upgrade / wait for next period; clients show billing CTA
+      return corsJson({ error: gate.reason, code: gate.code }, 402);
     }
 
     const body = await req.json();
@@ -1004,10 +1148,17 @@ const completeHandler = httpAction(async (ctx, req) => {
   const workosId = identity.subject;
 
   try {
+    // Bind free quota + IP signup claim before the usage gate (repairs missing usage rows).
+    try {
+      await claimSignupForIdentity(ctx, req, identity);
+    } catch (claimErr) {
+      console.error('[signup] claim before AI failed:', claimErr);
+    }
+
     const gate = await ctx.runQuery(internal.usage.assertCanUseAI, { workosId });
     if (gate.ok === false) {
-      const status = gate.code === 'subscription_required' ? 402 : 429;
-      return corsJson({ error: gate.reason, code: gate.code }, status);
+      // 402: upgrade / wait for next period; clients show billing CTA
+      return corsJson({ error: gate.reason, code: gate.code }, 402);
     }
 
     const body = await req.json();

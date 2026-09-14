@@ -2,6 +2,7 @@ import { mutation, query } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import { OFFICIAL_AUTHOR_ID, OFFICIAL_AUTHOR_NAME } from './defaultStates';
+import { ensureFreeUsageRow } from './signupRateLimit';
 
 export function nameFromParts(
   firstName?: string | null,
@@ -77,6 +78,10 @@ export async function ensureUserFromIdentity(
     createdAt: now,
     updatedAt: now,
   });
+
+  // Seed free lifetime usage so quotas show up before the first chat.
+  await ensureFreeUsageRow(ctx, identity.subject, now);
+
   return (await ctx.db.get(id))!;
 }
 
@@ -119,7 +124,7 @@ export const upsertUser = mutation({
       return existingUser._id;
     }
 
-    return await ctx.db.insert('users', {
+    const userId = await ctx.db.insert('users', {
       workosId: args.workosId,
       email: args.email,
       firstName: args.firstName,
@@ -128,6 +133,8 @@ export const upsertUser = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    await ensureFreeUsageRow(ctx, args.workosId, now);
+    return userId;
   },
 });
 

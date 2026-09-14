@@ -256,9 +256,17 @@ const ChatView = () => {
         const local = await window.electronAPI?.readPresets?.();
         if (cancelled) return;
         if (local?.success && local.presets && Object.keys(local.presets).length > 0) {
-          setPresets(local.presets);
+          const account = await convex.current.query(api.account.getMyAccount, {});
+          const freeNames = new Set(
+            (account?.freeStateNames?.length
+              ? account.freeStateNames
+              : ['Simplify', 'List', 'Critique']
+            ).map((n) => n.toLowerCase()),
+          );
+          const allowAll = Boolean(account?.canCreateStates);
           const sanitized = {};
           for (const [name, raw] of Object.entries(local.presets)) {
+            if (!allowAll && !freeNames.has(String(name).toLowerCase())) continue;
             if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
             const o = {};
             if (typeof raw.description === 'string') o.description = raw.description;
@@ -272,10 +280,13 @@ const ChatView = () => {
             if (typeof raw.presencePenalty === 'number') o.presencePenalty = raw.presencePenalty;
             if (typeof raw.stop === 'string') o.stop = raw.stop;
             else if (Array.isArray(raw.stop) && raw.stop.every((s) => typeof s === 'string')) o.stop = raw.stop;
-            o.visibility = raw.visibility === 'public' ? 'public' : 'private';
+            o.visibility = 'private';
             sanitized[name] = o;
           }
-          await convex.current.mutation(api.states.saveMyStates, { states: sanitized });
+          setPresets(Object.keys(sanitized).length > 0 ? sanitized : local.presets);
+          if (Object.keys(sanitized).length > 0) {
+            await convex.current.mutation(api.states.saveMyStates, { states: sanitized });
+          }
         }
       } catch (err) {
         console.error('Failed to sync cloud states:', err);
@@ -458,6 +469,27 @@ const ChatView = () => {
 
     let account;
     try {
+      // Repair webhook users that never got a usage row / signup claim.
+      try {
+        await convex.current.mutation(api.signupRateLimit.ensureMyFreeUsage, {});
+      } catch (repairErr) {
+        console.warn('[signup] ensureMyFreeUsage:', repairErr);
+      }
+      try {
+        const token = await window.electronAPI?.getAuthToken?.();
+        if (token) {
+          await fetch(`${getConvexSiteBaseUrl()}/auth/claim-signup`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+        }
+      } catch (claimErr) {
+        console.warn('[signup] claim-signup:', claimErr);
+      }
+
       account = await convex.current.query(api.account.getMyAccount, {});
     } catch (error) {
       const msg = error?.message || String(error);
@@ -482,11 +514,17 @@ const ChatView = () => {
       };
     }
     setWebsiteUrl(account.websiteUrl || 'https://getproxy.ca');
-    if (!account.subscriptionActive) {
-      return { ok: false, reason: 'Active PROXY plan required', websiteUrl: account.websiteUrl };
-    }
     if (!account.canUseAI) {
-      return { ok: false, reason: 'Monthly usage limit reached', websiteUrl: account.websiteUrl };
+      const signupBlocked = account.blockReason === 'signup_rate_limited';
+      return {
+        ok: false,
+        reason: signupBlocked
+          ? 'Too many free accounts were created from this network today. Try again tomorrow or subscribe.'
+          : account.subscriptionActive
+            ? 'Monthly usage limit reached'
+            : 'Free token limit reached. Subscribe to PROXY for more.',
+        websiteUrl: account.websiteUrl,
+      };
     }
     const result = { ok: true, account };
     accountCacheRef.current = { at: now, result };
@@ -591,9 +629,13 @@ const ChatView = () => {
         }
 
         if (response.status === 402 || response.status === 429) {
-          setAccountGateReason(errorData.code === 'usage_limit_reached'
-            ? 'Monthly usage limit reached'
-            : 'Active PROXY plan required');
+          setAccountGateReason(
+            errorData.code === 'usage_limit_reached'
+              ? 'Free or monthly usage limit reached'
+              : errorData.code === 'signup_rate_limited'
+                ? (errorData.error || 'Too many free accounts from this network today')
+                : 'Active PROXY plan required'
+          );
           setSubscriptionRequired(true);
           if (errorData.websiteUrl) setWebsiteUrl(errorData.websiteUrl);
         }
@@ -779,9 +821,13 @@ const ChatView = () => {
         throw new Error('Session expired. Click Sign in, finish login in the browser, then send your message again.');
       }
       if (res.status === 402 || res.status === 429) {
-        setAccountGateReason(err.code === 'usage_limit_reached'
-          ? 'Monthly usage limit reached'
-          : 'Active PROXY plan required');
+        setAccountGateReason(
+          err.code === 'usage_limit_reached'
+            ? 'Free or monthly usage limit reached'
+            : err.code === 'signup_rate_limited'
+              ? (err.error || 'Too many free accounts from this network today')
+              : 'Active PROXY plan required'
+        );
         setSubscriptionRequired(true);
         return { content: '', blocked: true };
       }
@@ -1351,9 +1397,10 @@ const ChatView = () => {
     return renderAuthShell(
       <div className="chat-auth-container">
         <div className="chat-auth-content">
-          <h2>{accountGateReason || 'Active PROXY plan required'}</h2>
+          <h2>{accountGateReason || 'Free token limit reached'}</h2>
           <p>
-            Subscribe, change plan, or check usage on the PROXY website. This app only checks whether your account can chat.
+            Free accounts include 30,000 weighted tokens (lifetime) and three states: Simplify, List,
+            and Critique. Subscribe on the website for more tokens and custom states.
           </p>
 
           {(accountGateReason || '').toLowerCase().includes('sign in') ||
@@ -1512,93 +1559,91 @@ const ChatView = () => {
           </div>
         )}
 
-        {attachedFiles.length > 0 && (
-          <div className="chat-attachments">
-            {attachedFiles.map((fileData, idx) => (
-              <div key={`${fileData.name}-${idx}`} className="chat-attachment-item">
-                {fileData.type.startsWith('image/') ? (
-                  <img src={fileData.dataUrl} alt={fileData.name} className="attachment-preview" />
-                ) : (
-                  <div className="attachment-pdf-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                      <polyline points="14 2 14 8 20 8"></polyline>
-                    </svg>
-                  </div>
-                )}
-                <span className="attachment-name" title={fileData.name}>
-                  {fileData.name.length > 15 ? fileData.name.substring(0, 15) + '...' : fileData.name}
-                </span>
-                <button
-                  type="button"
-                  className="attachment-remove"
-                  onClick={() => removeFile(idx)}
-                  aria-label="Remove attachment"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
         <form className="chat-input-container" onSubmit={handleSubmit}>
-          <input
-            type="file"
-            ref={fileInputRef}
-            className="chat-file-input"
-            accept="image/*,application/pdf"
-            multiple
-            onChange={handleFileSelect}
-            aria-label="Attach file"
-          />
-          <button
-            type="button"
-            className="chat-attach-button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading}
-            aria-label="Attach file"
-            title="Attach image or PDF"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
-          <input
-            type="text"
-            className="chat-input-field"
-            placeholder="Message PROXY…"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            disabled={isLoading}
-            autoFocus
-          />
-          <label className="chat-input-state">
-            <span className="visually-hidden">State</span>
-            <select
-              className="chat-input-state-select select-field"
-              value={activePreset || ''}
-              onChange={(e) => setActivePreset(e.target.value || null)}
-            >
-              <option value="">{displayState}</option>
-              {presetNames.filter((n) => n !== activePreset).map((name) => (
-                <option key={name} value={name}>{name}</option>
+          {attachedFiles.length > 0 && (
+            <div className="chat-attachments" aria-label="Attachments">
+              {attachedFiles.map((fileData, idx) => (
+                <div key={`${fileData.name}-${idx}`} className="chat-attachment-item">
+                  {fileData.type.startsWith('image/') ? (
+                    <img src={fileData.dataUrl} alt={fileData.name} className="attachment-preview" />
+                  ) : (
+                    <div className="attachment-pdf-icon" title={fileData.name}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                      </svg>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="attachment-remove"
+                    onClick={() => removeFile(idx)}
+                    aria-label={`Remove ${fileData.name}`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
               ))}
-            </select>
-          </label>
-          <button
-            type="submit"
-            className="chat-input-submit"
-            disabled={(!inputValue.trim() && attachedFiles.length === 0) || isLoading}
-            aria-label="Send message"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
-          </button>
+            </div>
+          )}
+          <div className="chat-input-row">
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="chat-file-input"
+              accept="image/*,application/pdf"
+              multiple
+              onChange={handleFileSelect}
+              aria-label="Attach file"
+            />
+            <button
+              type="button"
+              className="chat-attach-button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+              aria-label="Attach file"
+              title="Attach image or PDF"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+            <input
+              type="text"
+              className="chat-input-field"
+              placeholder="Message PROXY…"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              disabled={isLoading}
+              autoFocus
+            />
+            <label className="chat-input-state">
+              <span className="visually-hidden">State</span>
+              <select
+                className="chat-input-state-select select-field"
+                value={activePreset || ''}
+                onChange={(e) => setActivePreset(e.target.value || null)}
+              >
+                <option value="">{displayState}</option>
+                {presetNames.filter((n) => n !== activePreset).map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="chat-input-submit"
+              disabled={(!inputValue.trim() && attachedFiles.length === 0) || isLoading}
+              aria-label="Send message"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+            </button>
+          </div>
         </form>
       </div>
     </AppShell>

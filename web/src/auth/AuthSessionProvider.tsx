@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { LoginRequiredError, type User } from '@workos-inc/authkit-js'
 import { getAuthClient, getAuthInitError, startWorkosSignIn, switchWorkosAccount, type AuthClient } from './client'
+import { claimSignupQuota } from './claimSignup'
 
 type AuthContextValue = {
   user: User | null
@@ -36,6 +37,13 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
         setIsLoading(false)
       })
   }, [])
+
+  // Bind free-tier signup to client IP whenever a session is present.
+  useEffect(() => {
+    if (!user || !clientRef.current) return
+    const client = clientRef.current
+    void claimSignupQuota(() => client.getAccessToken(), user.id)
+  }, [user])
 
   const value = useMemo<AuthContextValue>(
     () => ({
