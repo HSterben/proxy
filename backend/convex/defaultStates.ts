@@ -149,6 +149,42 @@ export function isDefaultStateName(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(DEFAULT_STATES, name);
 }
 
+/**
+ * Older shipped instructions that should still collapse to the live official
+ * default (e.g. Simplify used to append a "dumbed down analysis" line).
+ */
+export const LEGACY_DEFAULT_INSTRUCTIONS: Record<string, string[]> = {
+  Simplify: [
+    "You are a helpful assistant that simplifies text. Make it clearer and easier to understand. Use shorter sentences and plain language. Preserve the main ideas. Start every sentence with 'Here's a dumbed down analysis.'",
+    'You are a helpful assistant that simplifies text. Make it clearer and easier to understand. Use shorter sentences and plain language. Preserve the main ideas. Start every sentence with "Here\'s a dumbed down analysis."',
+  ],
+};
+
+export function instructionText(value: DefaultStateValue | { systemInstruction?: string; system_instruction?: string } | unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const v = value as { systemInstruction?: string; system_instruction?: string };
+  return (v.systemInstruction || v.system_instruction || '').trim();
+}
+
+/** True when a private clone is still the stock/legacy official body (safe to replace). */
+export function isReplaceableDefaultClone(name: string, value: unknown): boolean {
+  if (!isDefaultStateName(name)) return false;
+  const instr = instructionText(value);
+  if (!instr) return false;
+  const stock = instructionText(DEFAULT_STATES[name]);
+  if (instr === stock) return true;
+  const legacy = LEGACY_DEFAULT_INSTRUCTIONS[name] || [];
+  if (legacy.some((line) => instr === line.trim())) return true;
+  // Any Simplify body that still forces the old per-sentence prefix.
+  if (
+    name.toLowerCase() === 'simplify' &&
+    /start every sentence with\s+['"]here's a dumbed down analysis/i.test(instr)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function normalizeTags(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const allowed = new Set<string>(STATE_TAG_OPTIONS);

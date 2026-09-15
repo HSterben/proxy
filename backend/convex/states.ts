@@ -8,6 +8,7 @@ import {
   OFFICIAL_AUTHOR_NAME,
   defaultStateNames,
   isDefaultStateName,
+  isReplaceableDefaultClone,
   normalizeTags,
 } from './defaultStates';
 import {
@@ -112,10 +113,7 @@ function instructionOf(value: StateValue | unknown): string {
 }
 
 function matchesStockDefault(name: string, value: StateValue): boolean {
-  if (!isDefaultStateName(name)) return false;
-  const stock = DEFAULT_STATES[name];
-  if (!stock) return false;
-  return instructionOf(value) === (stock.systemInstruction || '').trim();
+  return isReplaceableDefaultClone(name, value);
 }
 
 async function officialIdByKey(
@@ -408,9 +406,40 @@ async function reconcileLibraryIds(
   libraryIds: Id<'states'>[]
 ): Promise<Id<'states'>[]> {
   const official = await officialIdByKey(ctx);
-  const now = Date.now();
+  const subscribed = await userHasActiveSubscription(ctx, workosId);
   const next: Id<'states'>[] = [];
-  const seenName = new Set<string>();
+  const chosenByName = new Map<string, Id<'states'>>();
+
+  const choose = async (lower: string, id: Id<'states'>, doc: Doc<'states'>) => {
+    const existingId = chosenByName.get(lower);
+    if (!existingId) {
+      chosenByName.set(lower, id);
+      next.push(id);
+      return;
+    }
+    if (existingId === id) return;
+    const existing = await ctx.db.get(existingId);
+    // Prefer official when two docs share a name.
+    if (doc.isOfficial && existing && !existing.isOfficial) {
+      const idx = next.indexOf(existingId);
+      if (idx >= 0) next[idx] = id;
+      chosenByName.set(lower, id);
+      if (
+        existing.authorWorkosId === workosId &&
+        resolveVisibility(existing) === 'private'
+      ) {
+        await ctx.db.delete(existing._id);
+      }
+      return;
+    }
+    if (
+      doc.authorWorkosId === workosId &&
+      !doc.isOfficial &&
+      resolveVisibility(doc) === 'private'
+    ) {
+      await ctx.db.delete(doc._id);
+    }
+  };
 
   for (const id of libraryIds) {
     const doc = await ctx.db.get(id);
@@ -418,31 +447,24 @@ async function reconcileLibraryIds(
 
     const lower = doc.name.toLowerCase();
     const owned = doc.authorWorkosId === workosId && !doc.isOfficial;
+    const officialId = official.get(doc.name);
+    const forceOfficialFree =
+      !subscribed && owned && isFreeStateName(doc.name) && Boolean(officialId);
+    const replaceableClone =
+      owned && officialId && matchesStockDefault(doc.name, normalizeState(doc.state));
 
-    if (owned && matchesStockDefault(doc.name, normalizeState(doc.state))) {
-      const officialId = official.get(doc.name);
-      if (officialId) {
-        if (resolveVisibility(doc) === 'private') {
-          await ctx.db.delete(doc._id);
-        }
-        if (!seenName.has(lower)) {
-          seenName.add(lower);
-          next.push(officialId);
-        }
-        continue;
-      }
-    }
-
-    if (seenName.has(lower)) {
-      if (owned && resolveVisibility(doc) === 'private') {
+    if ((forceOfficialFree || replaceableClone) && officialId) {
+      if (resolveVisibility(doc) === 'private') {
         await ctx.db.delete(doc._id);
       }
+      await choose(lower, officialId, (await ctx.db.get(officialId))!);
       continue;
     }
 
-    seenName.add(lower);
-    next.push(doc._id);
+    await choose(lower, doc._id, doc);
   }
+
+  const seenName = new Set(chosenByName.keys());
 
   const authored: Doc<'states'>[] = await ctx.db
     .query('states')
@@ -459,6 +481,10 @@ async function reconcileLibraryIds(
   for (const doc of authored) {
     if (doc.isOfficial || inLibrary.has(doc._id)) continue;
     if (resolveVisibility(doc) !== 'private') continue;
+    if (!subscribed && isFreeStateName(doc.name)) {
+      await ctx.db.delete(doc._id);
+      continue;
+    }
     if (matchesStockDefault(doc.name, normalizeState(doc.state))) {
       await ctx.db.delete(doc._id);
       continue;
@@ -550,20 +576,45 @@ export const getMyStates = query({
 
     const workosId = identity.subject;
     const subscribed = await userHasActiveSubscription(ctx, workosId);
+    const official = await officialIdByKey(ctx);
     let libraryIds = await listLibraryStateIds(ctx, workosId);
 
+    // Read-only view of plan defaults (mutations live in ensureMyLibrary).
     if (libraryIds.length === 0) {
       libraryIds = await officialSeedIdsForPlan(ctx, subscribed);
     } else {
-      libraryIds = await syncOfficialLibraryForPlan(ctx, workosId, subscribed);
+      const required = await officialSeedIdsForPlan(ctx, subscribed);
+      const officialIds = new Set(official.values());
+      const requiredSet = new Set(required);
+      const kept: Id<'states'>[] = [];
+      for (const id of libraryIds) {
+        if (!officialIds.has(id)) {
+          kept.push(id);
+          continue;
+        }
+        if (requiredSet.has(id)) kept.push(id);
+      }
+      for (const id of required) {
+        if (!kept.includes(id)) kept.push(id);
+      }
+      libraryIds = kept;
     }
 
     const states: Record<string, StateValue> = {};
-    const library = [];
-    for (const id of libraryIds) {
-      const doc = await ctx.db.get(id);
-      if (!doc) continue;
-      if (!subscribed && !isFreeStateName(doc.name)) continue;
+    const library: Array<{
+      id: Id<'states'>;
+      name: string;
+      description: string;
+      visibility: Visibility;
+      isOfficial: boolean;
+      isOwner: boolean;
+      state: StateValue & { visibility: Visibility; description?: string };
+    }> = [];
+    const usedNames = new Set<string>();
+
+    const pushDoc = (doc: Doc<'states'>) => {
+      if (!subscribed && !isFreeStateName(doc.name)) return;
+      const lower = doc.name.toLowerCase();
       const visibility = resolveVisibility(doc);
       const state = {
         ...normalizeState(doc.state),
@@ -573,6 +624,13 @@ export const getMyStates = query({
           normalizeState(doc.state).desc ||
           doc.description,
       };
+      // Prefer official body when a private/legacy clone shares the name.
+      if (usedNames.has(lower) && !doc.isOfficial) return;
+      if (usedNames.has(lower) && doc.isOfficial) {
+        const idx = library.findIndex((row) => row.name.toLowerCase() === lower);
+        if (idx >= 0) library.splice(idx, 1);
+      }
+      usedNames.add(lower);
       states[doc.name] = state;
       library.push({
         id: doc._id,
@@ -583,36 +641,43 @@ export const getMyStates = query({
         isOwner: doc.authorWorkosId === workosId,
         state,
       });
+    };
+
+    // Official / resolved-official docs first so they win name collisions against stale forks.
+    const officialFirst: Doc<'states'>[] = [];
+    const rest: Doc<'states'>[] = [];
+    for (const id of libraryIds) {
+      const doc = await ctx.db.get(id);
+      if (!doc) continue;
+      // Resolve replaceable private clones to the live official document.
+      if (
+        !doc.isOfficial &&
+        isDefaultStateName(doc.name) &&
+        (matchesStockDefault(doc.name, normalizeState(doc.state)) ||
+          (!subscribed && isFreeStateName(doc.name)))
+      ) {
+        const officialId = official.get(doc.name);
+        const officialDoc = officialId ? await ctx.db.get(officialId) : null;
+        if (officialDoc) {
+          officialFirst.push(officialDoc);
+          continue;
+        }
+      }
+      if (doc.isOfficial) officialFirst.push(doc);
+      else rest.push(doc);
     }
+    for (const doc of officialFirst) pushDoc(doc);
+    for (const doc of rest) pushDoc(doc);
 
     // Guarantee free defaults are present even if library was empty/mis-seeded.
     if (!subscribed) {
-      const official = await officialIdByKey(ctx);
       for (const name of FREE_STATE_NAMES) {
         if (states[name]) continue;
         const id = official.get(name);
         if (!id) continue;
         const doc = await ctx.db.get(id);
         if (!doc) continue;
-        const visibility = resolveVisibility(doc);
-        const state = {
-          ...normalizeState(doc.state),
-          visibility,
-          description:
-            normalizeState(doc.state).description ||
-            normalizeState(doc.state).desc ||
-            doc.description,
-        };
-        states[doc.name] = state;
-        library.push({
-          id: doc._id,
-          name: doc.name,
-          description: doc.description,
-          visibility,
-          isOfficial: Boolean(doc.isOfficial),
-          isOwner: false,
-          state,
-        });
+        pushDoc(doc);
       }
     }
 
