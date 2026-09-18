@@ -36,7 +36,7 @@ export const PAGE_META: Record<string, PageMeta> = {
     index: true,
   },
   '/about': {
-    title: `About PROXY, Customizable AI chat with named states`,
+    title: `About PROXY | Customizable AI chat with named states`,
     description:
       'PROXY is an AI chat app for Windows and the web. Reusable states (named triggers + instructions) sync to your account. Built for people who want repeatable setups, not one-off prompts.',
     path: '/about',
@@ -50,10 +50,17 @@ export const PAGE_META: Record<string, PageMeta> = {
     index: true,
   },
   '/contact': {
-    title: `Contact PROXY, Support and partnerships`,
+    title: `Contact PROXY | Support and partnerships`,
     description:
       'Contact the PROXY team about the Windows app, PROXY Web, billing, states, or partnerships. Email contact@sterben.dev or use the form on this page.',
     path: '/contact',
+    index: true,
+  },
+  '/privacy': {
+    title: `Privacy Policy, PROXY`,
+    description:
+      'PROXY privacy policy: account and identity data, prompts and AI processing, usage metrics, Convex, WorkOS, AI providers, Stripe billing, retention, security, and your rights.',
+    path: '/privacy',
     index: true,
   },
   '/account': {

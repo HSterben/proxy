@@ -395,13 +395,24 @@ const ChatView = () => {
     return noPreset;
   };
 
+  // Always resolve via main-process store (refresh if near expiry). Never close over a
+  // React-state snapshot, that caused AI HTTP 401s while Convex queries still worked.
+  const resolveAccessToken = async () => {
+    const token = (await window.electronAPI?.getAuthToken?.()) ?? null;
+    if (token) setAuthToken(token);
+    return token;
+  };
+
+  const wireConvexAuth = () => {
+    convex.current.setAuth(async () => (await window.electronAPI?.getAuthToken?.()) ?? null);
+  };
+
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const token = await window.electronAPI.getAuthToken();
+        const token = await resolveAccessToken();
         if (token) {
-          setAuthToken(token);
-          convex.current.setAuth(async () => token);
+          wireConvexAuth();
           setIsAuthenticated(true);
         } else {
           setIsAuthenticated(false);
@@ -417,7 +428,7 @@ const ChatView = () => {
     const unsubSuccess = window.electronAPI.onAuthSuccess?.((data) => {
       if (data.token) {
         setAuthToken(data.token);
-        convex.current.setAuth(async () => data.token);
+        wireConvexAuth();
         setIsAuthenticated(true);
       } else {
         setAuthToken(null);
@@ -472,7 +483,7 @@ const ChatView = () => {
       const result = await window.electronAPI.refreshAuthToken();
       if (result.success && result.token) {
         setAuthToken(result.token);
-        convex.current.setAuth(async () => result.token);
+        wireConvexAuth();
         return true;
       }
     } catch (err) {
@@ -627,14 +638,15 @@ const ChatView = () => {
     const maxTokens = clampOutputTokens(options.maxTokens);
 
     try {
-      if (!authToken) throw new Error('Not signed in. Sign in, then send your message again.');
+      const token = await resolveAccessToken();
+      if (!token) throw new Error('Not signed in. Sign in, then send your message again.');
 
       const streamUrl = `${getConvexSiteBaseUrl()}/openrouter/stream`;
       const response = await fetch(streamUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
           messages: contextMessages,
@@ -800,7 +812,8 @@ const ChatView = () => {
     const systemInstruction = options.systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION;
     const contextMessages = buildContextMessages(message, files, systemInstruction);
     const maxTokens = clampOutputTokens(options.maxTokens);
-    if (!authToken) throw new Error('Not signed in. Sign in, then send your message again.');
+    const token = await resolveAccessToken();
+    if (!token) throw new Error('Not signed in. Sign in, then send your message again.');
     const url = `${getConvexSiteBaseUrl()}/openrouter/complete`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s for slow free models
@@ -811,7 +824,7 @@ const ChatView = () => {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
           messages: contextMessages,

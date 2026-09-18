@@ -203,6 +203,23 @@ export function jsonLdForPath(pathname: string) {
         mainEntity: { '@id': ORG_ID },
       },
     )
+  } else if (pathname === '/privacy') {
+    graph.push(
+      breadcrumbLd([
+        { name: SITE_NAME, path: '/' },
+        { name: 'Privacy Policy', path: '/privacy' },
+      ]),
+      {
+        '@type': 'WebPage',
+        '@id': `${absoluteUrl('/privacy')}#webpage`,
+        url: absoluteUrl('/privacy'),
+        name: `Privacy Policy, ${SITE_NAME}`,
+        description:
+          'How PROXY collects and uses account, prompt, usage, and billing data across web and Windows.',
+        isPartOf: { '@id': WEBSITE_ID },
+        about: { '@id': ORG_ID },
+      },
+    )
   }
 
   return {

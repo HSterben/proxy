@@ -19,6 +19,7 @@ export const footerLinks = [
   { label: 'States', href: '/states' },
   { label: 'About', href: '/about' },
   { label: 'Contact', href: '/contact' },
+  { label: 'Privacy', href: '/privacy' },
 ] as const
 
 export const proofItems = [
