@@ -64,7 +64,7 @@ function formatDate(ms?: number) {
 }
 
 export default function Account() {
-  const { user, isLoading, signIn, getAccessToken } = useAuth()
+  const { user, isLoading, signIn, signOut, getAccessToken } = useAuth()
   const convex = useRef(new ConvexClient(convexUrl))
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [account, setAccount] = useState<AccountSnapshot | null | undefined>(undefined)
@@ -87,7 +87,9 @@ export default function Account() {
   const [editMaxTokens, setEditMaxTokens] = useState('')
   const [editAdvanced, setEditAdvanced] = useState(false)
   const [editVisibility, setEditVisibility] = useState<'public' | 'private'>('private')
-
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState('')
+  const [deletingAccount, setDeletingAccount] = useState(false)
   const refreshProfileAndPosts = async () => {
     const [mine, posts] = await Promise.all([
       convex.current.query(api.users.getMyProfile, {}),
@@ -307,6 +309,33 @@ export default function Account() {
       setProfileError(userFacingError(err, 'Could not delete'))
     } finally {
       setBusyId(null)
+    }
+  }
+
+  const accountName =
+    profile?.displayName?.trim() ||
+    [user?.firstName, user?.lastName]
+      .map((s) => (typeof s === 'string' ? s.trim() : ''))
+      .filter(Boolean)
+      .join(' ') ||
+    user?.email?.trim()?.split('@')[0] ||
+    'PROXY user'
+  const deletePhrase = `Delete my account ${accountName}`
+  const deleteConfirmMatches = deleteConfirm.trim() === deletePhrase
+
+  const deleteMyAccount = async () => {
+    if (!user || !deleteConfirmMatches || deletingAccount) return
+    setDeletingAccount(true)
+    setProfileError('')
+    try {
+      convex.current.setAuth(async () => (await getAccessToken()) ?? null)
+      await convex.current.mutation(api.users.deleteMyAccount, {
+        confirmation: deleteConfirm.trim(),
+      })
+      await signOut({ returnTo: '/' })
+    } catch (err) {
+      setProfileError(userFacingError(err, 'Could not delete account'))
+      setDeletingAccount(false)
     }
   }
 
@@ -763,6 +792,79 @@ export default function Account() {
           )}
         </section>
       </div>
+
+      <section className="card mt-4 border-red-200/80 p-6 md:p-8">
+        <h2 className="text-lg font-semibold text-red-800">Delete account</h2>
+        <p className="mt-2 max-w-2xl text-[15px] text-ink/55">
+          Permanently deletes your PROXY profile, states, library, and usage data on our servers.
+          This cannot be undone. Cancel any paid plan under{' '}
+          <Link to="/account/billing" className="font-medium text-ink underline-offset-2 hover:underline">
+            Billing
+          </Link>{' '}
+          first if you have an active subscription.
+        </p>
+
+        {!deleteOpen ? (
+          <button
+            type="button"
+            className="pressable mt-6 inline-flex min-h-11 items-center gap-2 rounded-[10px] border border-red-300 bg-white px-5 text-[15px] font-semibold text-red-700 hover:bg-red-50"
+            onClick={() => {
+              setDeleteOpen(true)
+              setDeleteConfirm('')
+              setProfileError('')
+            }}
+          >
+            <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+            Delete my account
+          </button>
+        ) : (
+          <div className="mt-6 max-w-lg space-y-4 rounded-[10px] border border-red-200 bg-red-50/50 p-4 md:p-5">
+            <p className="text-[14px] text-ink/70">
+              To confirm, type{' '}
+              <span className="font-mono text-[13px] font-semibold text-ink">{deletePhrase}</span>{' '}
+              below.
+            </p>
+            <label className="block text-[14px]" htmlFor="delete-account-confirm">
+              <span className="sr-only">Confirmation phrase</span>
+              <input
+                id="delete-account-confirm"
+                className="w-full rounded-[10px] border border-red-200 bg-white px-3 py-2.5 font-mono text-[14px]"
+                autoComplete="off"
+                spellCheck={false}
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder={deletePhrase}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={!deleteConfirmMatches || deletingAccount}
+                className="pressable inline-flex min-h-11 items-center gap-2 rounded-[10px] bg-red-700 px-5 text-[15px] font-semibold text-white disabled:opacity-50"
+                onClick={() => void deleteMyAccount()}
+              >
+                {deletingAccount ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                )}
+                {deletingAccount ? 'Deleting…' : 'Permanently delete'}
+              </button>
+              <button
+                type="button"
+                disabled={deletingAccount}
+                className="pressable inline-flex min-h-11 items-center rounded-[10px] border border-hairline bg-white px-5 text-[15px] disabled:opacity-60"
+                onClick={() => {
+                  setDeleteOpen(false)
+                  setDeleteConfirm('')
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

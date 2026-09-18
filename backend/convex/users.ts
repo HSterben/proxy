@@ -185,6 +185,118 @@ export const deleteUser = mutation({
   },
 });
 
+/**
+ * Self-service account deletion. Requires auth + typed confirmation matching
+ * "Delete my account <display name>". Removes Convex user data (profile, states,
+ * library, stars, usage, subscription rows, signup claims). Does not cancel Stripe
+ * or delete the WorkOS identity — cancel billing first if subscribed.
+ */
+export const deleteMyAccount = mutation({
+  args: {
+    confirmation: v.string(),
+  },
+  returns: v.object({ ok: v.literal(true) }),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error('Sign in required');
+
+    const workosId = identity.subject;
+    const user = await ctx.db
+      .query('users')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', workosId))
+      .first();
+
+    const accountName = user
+      ? resolveDisplayName(user)
+      : identity.name?.trim() ||
+        nameFromParts(
+          (identity as { givenName?: string }).givenName,
+          (identity as { familyName?: string }).familyName,
+          identity.email,
+        );
+
+    const expected = `Delete my account ${accountName}`;
+    if (args.confirmation.trim() !== expected) {
+      throw new Error(`Type exactly: ${expected}`);
+    }
+
+    // Owned gallery / private states (+ stars and library memberships on those states)
+    const ownedStates = await ctx.db
+      .query('states')
+      .withIndex('by_author', (q) => q.eq('authorWorkosId', workosId))
+      .collect();
+    for (const post of ownedStates) {
+      if (post.isOfficial) continue;
+      const stars = await ctx.db
+        .query('stateStars')
+        .withIndex('by_state', (q) => q.eq('stateId', post._id))
+        .collect();
+      for (const star of stars) await ctx.db.delete(star._id);
+
+      const memberships = await ctx.db
+        .query('userStates')
+        .withIndex('by_state', (q) => q.eq('stateId', post._id))
+        .collect();
+      for (const m of memberships) await ctx.db.delete(m._id);
+
+      await ctx.db.delete(post._id);
+    }
+
+    // Remaining library rows + stars this user placed on others' states
+    const library = await ctx.db
+      .query('userStates')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', workosId))
+      .collect();
+    for (const row of library) await ctx.db.delete(row._id);
+
+    const myStars = await ctx.db
+      .query('stateStars')
+      .withIndex('by_user_state', (q) => q.eq('workosId', workosId))
+      .collect();
+    for (const star of myStars) {
+      const state = await ctx.db.get(star.stateId);
+      if (state && typeof state.starCount === 'number' && state.starCount > 0) {
+        await ctx.db.patch(state._id, {
+          starCount: Math.max(0, state.starCount - 1),
+          updatedAt: Date.now(),
+        });
+      }
+      await ctx.db.delete(star._id);
+    }
+
+    const usageRows = await ctx.db
+      .query('usage')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', workosId))
+      .collect();
+    for (const row of usageRows) await ctx.db.delete(row._id);
+
+    const subs = await ctx.db
+      .query('subscriptions')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', workosId))
+      .collect();
+    for (const row of subs) await ctx.db.delete(row._id);
+
+    const claims = await ctx.db
+      .query('signupClaims')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', workosId))
+      .collect();
+    for (const row of claims) await ctx.db.delete(row._id);
+
+    if (user) {
+      if (user.avatarStorageId) {
+        try {
+          await ctx.storage.delete(user.avatarStorageId);
+        } catch {
+          // ignore
+        }
+      }
+      await ctx.db.delete(user._id);
+    }
+
+    return { ok: true as const };
+  },
+});
+
 export const getUserByEmail = query({
   args: { email: v.string() },
   returns: v.union(

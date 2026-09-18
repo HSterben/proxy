@@ -1,5 +1,3 @@
-import { Resend } from 'resend'
-
 export type ContactPayload = {
   name: string
   email: string
@@ -28,13 +26,43 @@ function clean(value: unknown, max: number): string {
     .slice(0, max)
 }
 
+/** Resend accepts `email@domain` or `Display Name <email@domain>`. */
+function resolveFromAddress(raw: string | undefined): string {
+  const fallback = 'PROXY Contact <onboarding@resend.dev>'
+  let value = (raw ?? '').trim()
+  if (!value) return fallback
+
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim()
+  }
+
+  const bareEmail = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/
+  const namedEmail = /^.+\s<[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>$/
+  if (bareEmail.test(value)) return `PROXY Contact <${value}>`
+  if (namedEmail.test(value)) return value
+
+  console.error('[contact] Invalid CONTACT_FROM_EMAIL; using Resend onboarding sender')
+  return fallback
+}
+
 export function parseContactBody(body: unknown): ContactPayload | { error: string } {
-  if (!body || typeof body !== 'object') return { error: 'Invalid body' }
-  const data = body as Record<string, unknown>
-  const name = clean(data.name, 120)
-  const email = clean(data.email, 200)
-  const projectType = clean(data.projectType, 80)
-  const message = clean(data.message, 8000)
+  let data: unknown = body
+  if (typeof body === 'string') {
+    try {
+      data = JSON.parse(body)
+    } catch {
+      return { error: 'Invalid body' }
+    }
+  }
+  if (!data || typeof data !== 'object') return { error: 'Invalid body' }
+  const record = data as Record<string, unknown>
+  const name = clean(record.name, 120)
+  const email = clean(record.email, 200)
+  const projectType = clean(record.projectType, 80)
+  const message = clean(record.message, 8000)
 
   if (!name || !email || !message) return { error: 'Name, email, and message are required' }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Invalid email' }
@@ -42,35 +70,58 @@ export function parseContactBody(body: unknown): ContactPayload | { error: strin
   return { name, email, projectType, message }
 }
 
-export async function sendContactEmail(payload: ContactPayload): Promise<{ ok: true } | { error: string }> {
-  const apiKey = process.env.RESEND_API_KEY
-  if (!apiKey) return { error: 'Email is not configured' }
+/**
+ * Send via Resend HTTP API (no SDK) so Vercel Node + `"type": "module"`
+ * does not crash on ESM/CJS interop with the `resend` package.
+ */
+export async function sendContactEmail(
+  payload: ContactPayload,
+): Promise<{ ok: true } | { error: string }> {
+  const apiKey = process.env.RESEND_API_KEY?.trim()
+  if (!apiKey) {
+    console.error('[contact] RESEND_API_KEY is missing')
+    return { error: 'Email is not configured' }
+  }
 
-  const to = process.env.CONTACT_TO_EMAIL || 'contact@sterben.dev'
-  const from =
-    process.env.CONTACT_FROM_EMAIL || 'PROXY Contact <onboarding@resend.dev>'
+  const to = process.env.CONTACT_TO_EMAIL?.trim() || 'contact@sterben.dev'
+  const from = resolveFromAddress(process.env.CONTACT_FROM_EMAIL)
 
   const topic = payload.projectType ? ` · ${payload.projectType}` : ''
-  const resend = new Resend(apiKey)
-  const { error } = await resend.emails.send({
-    from,
-    to: [to],
-    replyTo: payload.email,
-    subject: `PROXY contact from ${payload.name}${topic}`,
-    text: [
-      `Name: ${payload.name}`,
-      `Email: ${payload.email}`,
-      payload.projectType ? `Topic: ${payload.projectType}` : null,
-      '',
-      payload.message,
-    ]
-      .filter((line) => line !== null)
-      .join('\n'),
-  })
+  const text = [
+    `Name: ${payload.name}`,
+    `Email: ${payload.email}`,
+    payload.projectType ? `Topic: ${payload.projectType}` : null,
+    '',
+    payload.message,
+  ]
+    .filter((line) => line !== null)
+    .join('\n')
 
-  if (error) {
-    console.error('[contact] Resend error:', error)
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        reply_to: payload.email,
+        subject: `PROXY contact from ${payload.name}${topic}`,
+        text,
+      }),
+    })
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      console.error('[contact] Resend HTTP error:', response.status, detail)
+      return { error: 'Failed to send message' }
+    }
+
+    return { ok: true }
+  } catch (err) {
+    console.error('[contact] Resend request failed:', err)
     return { error: 'Failed to send message' }
   }
-  return { ok: true }
 }

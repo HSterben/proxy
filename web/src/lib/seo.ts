@@ -9,7 +9,7 @@ export const OG_IMAGE_URL = `${SITE_URL}${OG_IMAGE_PATH}`
 export const OG_IMAGE_WIDTH = 1200
 export const OG_IMAGE_HEIGHT = 630
 export const OG_IMAGE_ALT =
-  'PROXY, Fast customizable AI assistance. Named triggers that shape every reply. getproxy.ca'
+  'PROXY | Fast customizable AI assistance. Named triggers that shape every reply. getproxy.ca'
 
 export const SITE_TAGLINE = 'Fast customizable AI assistance'
 export const SITE_TAGLINE_SECONDARY = 'Named triggers that shape every reply.'

@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import Reveal from '../components/ui/Reveal'
 import { SITE_LINKS } from '../lib/site'
 
-const LAST_UPDATED = 'September 15, 2026'
+const LAST_UPDATED = 'September 18, 2026'
 
 type Section = {
   id: string
@@ -90,8 +90,9 @@ const sections: Section[] = [
     title: '7. Retention and deletion',
     paragraphs: [
       'We retain account, state, usage, and billing linkage data for as long as your account is active and as needed to provide the Services, comply with law, resolve disputes, and enforce agreements.',
-      'You may request deletion of your PROXY account data by contacting us (see Contact below). We will delete or de-identify personal data we control, subject to legal retention needs and data held independently by processors (for example Stripe invoices or WorkOS identity records). Published gallery states may need to be unpublished or removed as part of deletion.',
-      'After deletion, residual copies may remain briefly in backups or logs until they are rotated in the ordinary course of operations.',
+      'You can delete your PROXY account yourself while signed in: open Account on getproxy.ca, choose Delete my account, and type the confirmation phrase shown there. That permanently removes PROXY profile data we control (including your display profile, states you own, library memberships, usage records, and related subscription rows in our database). Cancel any active paid plan under Account → Billing before deleting if you want billing to stop.',
+      'Self-serve deletion does not automatically cancel Stripe billing or erase your WorkOS sign-in identity held by those processors. Residual copies may remain briefly in backups or logs until rotated in the ordinary course of operations.',
+      'If deletion fails, something looks incomplete, or you need help with processor-side records (for example Stripe invoices or WorkOS identity), contact us (see Contact below) and we will help complete the request subject to legal retention needs.',
     ],
   },
   {
@@ -105,11 +106,10 @@ const sections: Section[] = [
     id: 'rights',
     title: '9. Your rights and choices',
     paragraphs: [
-      'Depending on where you live, you may have rights to access, correct, delete, or obtain a copy of personal information we hold about you, or to object to or restrict certain processing. To exercise these rights, email us at the address below. We may need to verify your identity before responding.',
-      'You can update some profile information in-product, manage billing through Stripe’s portal, and sign out of sessions. You may also contact us to close your account.',
+      'Depending on where you live, you may have rights to access, correct, delete, or obtain a copy of personal information we hold about you, or to object to or restrict certain processing. You can delete your PROXY account in-product as described above. For other requests, email us at the address below. We may need to verify your identity before responding.',
+      'You can update some profile information in-product, manage billing through Stripe’s portal, and sign out of sessions. If you run into issues deleting your account or need help afterward, contact us.',
     ],
-  },
-  {
+  },  {
     id: 'children',
     title: '10. Children',
     paragraphs: [
