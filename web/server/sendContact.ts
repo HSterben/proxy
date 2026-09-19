@@ -26,26 +26,72 @@ function clean(value: unknown, max: number): string {
     .slice(0, max)
 }
 
-/** Resend accepts `email@domain` or `Display Name <email@domain>`. */
-function resolveFromAddress(raw: string | undefined): string {
-  const fallback = 'PROXY Contact <onboarding@resend.dev>'
-  let value = (raw ?? '').trim()
-  if (!value) return fallback
-
+function stripEnvQuotes(raw: string): string {
+  let value = raw.trim()
   if (
     (value.startsWith('"') && value.endsWith('"')) ||
     (value.startsWith("'") && value.endsWith("'"))
   ) {
     value = value.slice(1, -1).trim()
   }
+  return value.replace(/\s+/g, ' ').trim()
+}
 
-  const bareEmail = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/
-  const namedEmail = /^.+\s<[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>$/
-  if (bareEmail.test(value)) return `PROXY Contact <${value}>`
-  if (namedEmail.test(value)) return value
+function extractEmail(value: string): string | null {
+  const angled = value.match(/<([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)>/)
+  if (angled?.[1]) return angled[1]
+  const bare = value.match(/[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+/)
+  return bare?.[0] ?? null
+}
 
-  console.error('[contact] Invalid CONTACT_FROM_EMAIL; using Resend onboarding sender')
-  return fallback
+/**
+ * Mirrors sterben.dev contact API:
+ *   from: `Sterben.dev <${SITE_LINKS.email}>`
+ *   to:   SITE_LINKS.email
+ * Domain must be verified on this Resend account (sterben.dev is).
+ */
+const CONTACT_EMAIL = 'contact@sterben.dev'
+const DEFAULT_CONTACT_TO = CONTACT_EMAIL
+const DEFAULT_CONTACT_FROM = `PROXY <${CONTACT_EMAIL}>`
+
+function readOptionalEnv(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const raw = process.env[key]
+    if (raw == null) continue
+    const cleaned = stripEnvQuotes(raw)
+    if (cleaned) return cleaned
+  }
+  return undefined
+}
+
+function resolveToAddress(): string {
+  const raw = readOptionalEnv('CONTACT_TO_EMAIL', 'CONTACT_TO')
+  if (!raw) return DEFAULT_CONTACT_TO
+  const email = extractEmail(raw)
+  if (email) return email
+  console.error(
+    `[contact] Ignoring invalid CONTACT_TO_EMAIL=${JSON.stringify(raw)}; using ${DEFAULT_CONTACT_TO}`,
+  )
+  return DEFAULT_CONTACT_TO
+}
+
+function resolveFromAddress(): string {
+  const raw = readOptionalEnv('CONTACT_FROM_EMAIL', 'CONTACT_FROM')
+  if (!raw) return DEFAULT_CONTACT_FROM
+
+  const email = extractEmail(raw)
+  if (!email) {
+    console.error(
+      `[contact] Ignoring invalid CONTACT_FROM_EMAIL=${JSON.stringify(raw)}; using ${DEFAULT_CONTACT_FROM}`,
+    )
+    return DEFAULT_CONTACT_FROM
+  }
+
+  const named = raw.match(/^(.+?)\s*<[^>]+>$/)
+  if (named?.[1]?.trim()) {
+    return `${named[1].trim()} <${email}>`
+  }
+  return `PROXY <${email}>`
 }
 
 export function parseContactBody(body: unknown): ContactPayload | { error: string } {
@@ -83,8 +129,8 @@ export async function sendContactEmail(
     return { error: 'Email is not configured' }
   }
 
-  const to = process.env.CONTACT_TO_EMAIL?.trim() || 'contact@sterben.dev'
-  const from = resolveFromAddress(process.env.CONTACT_FROM_EMAIL)
+  const to = resolveToAddress()
+  const from = resolveFromAddress()
 
   const topic = payload.projectType ? ` · ${payload.projectType}` : ''
   const text = [
@@ -116,6 +162,12 @@ export async function sendContactEmail(
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
       console.error('[contact] Resend HTTP error:', response.status, detail)
+      if (response.status === 403) {
+        return {
+          error:
+            'Resend rejected the sender. Use a from-address on a domain verified in this Resend account (not onboarding@resend.dev), or confirm CONTACT_FROM_EMAIL matches your other site.',
+        }
+      }
       return { error: 'Failed to send message' }
     }
 

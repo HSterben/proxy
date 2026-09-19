@@ -4,6 +4,7 @@ export const navLinks = [
   { label: 'Pricing', href: '/#pricing' },
   { label: 'States', href: '/states' },
   { label: 'About', href: '/about' },
+  { label: 'Contact', href: '/contact' },
 ] as const
 
 /** In-page anchors for the home footer column (not duplicated in the top nav). */
@@ -14,7 +15,7 @@ export const homeAnchors = [
   { label: 'Pricing', href: '/#pricing' },
 ] as const
 
-/** Site pages for the footer (Contact lives here, not in the top nav). */
+/** Site pages for the footer. */
 export const footerLinks = [
   { label: 'States', href: '/states' },
   { label: 'About', href: '/about' },
