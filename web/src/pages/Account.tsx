@@ -90,6 +90,21 @@ export default function Account() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [deletingAccount, setDeletingAccount] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [betaUsers, setBetaUsers] = useState<
+    | {
+        workosId: string
+        email: string | null
+        name: string
+        betaTester: boolean
+        weightedTokensUsed: number
+        weightedTokenLimit: number
+      }[]
+    | null
+  >(null)
+  const [betaQuery, setBetaQuery] = useState('')
+  const [betaGrantingId, setBetaGrantingId] = useState<string | null>(null)
+
   const refreshProfileAndPosts = async () => {
     const [mine, posts] = await Promise.all([
       convex.current.query(api.users.getMyProfile, {}),
@@ -118,6 +133,32 @@ export default function Account() {
         setProfile(null)
         setPublished([])
       })
+      void convex.current
+        .query(api.admin.amIAdmin, {})
+        .then(async (admin) => {
+          const ok = Boolean(admin)
+          setIsAdmin(ok)
+          if (!ok) {
+            setBetaUsers(null)
+            return
+          }
+          try {
+            const list = await convex.current.query(api.admin.listUsersForBeta, {})
+            setBetaUsers(
+              (list as {
+                workosId: string
+                email: string | null
+                name: string
+                betaTester: boolean
+                weightedTokensUsed: number
+                weightedTokenLimit: number
+              }[]) || [],
+            )
+          } catch {
+            setBetaUsers([])
+          }
+        })
+        .catch(() => setIsAdmin(false))
     })()
   }, [user, getAccessToken])
 
@@ -309,6 +350,41 @@ export default function Account() {
       setProfileError(userFacingError(err, 'Could not delete'))
     } finally {
       setBusyId(null)
+    }
+  }
+
+  const grantBetaTester = async (target: { workosId: string; email: string | null; name: string }) => {
+    setBetaGrantingId(target.workosId)
+    setProfileError('')
+    try {
+      convex.current.setAuth(async () => (await getAccessToken()) ?? null)
+      const result = (await convex.current.mutation(api.admin.grantBetaTester, {
+        workosId: target.workosId,
+      })) as {
+        alreadyGranted: boolean
+        weightedTokenLimit: number
+        name: string
+      }
+      const list = await convex.current.query(api.admin.listUsersForBeta, {})
+      setBetaUsers(
+        (list as {
+          workosId: string
+          email: string | null
+          name: string
+          betaTester: boolean
+          weightedTokensUsed: number
+          weightedTokenLimit: number
+        }[]) || [],
+      )
+      showProfileNotice(
+        result.alreadyGranted
+          ? `${result.name} already has beta access (${result.weightedTokenLimit.toLocaleString()} limit)`
+          : `Granted beta to ${result.name} (${result.weightedTokenLimit.toLocaleString()} weighted tokens)`,
+      )
+    } catch (err) {
+      setProfileError(userFacingError(err, 'Could not grant beta tester'))
+    } finally {
+      setBetaGrantingId(null)
     }
   }
 
@@ -792,6 +868,66 @@ export default function Account() {
           )}
         </section>
       </div>
+
+      {isAdmin ? (
+        <section className="card mt-4 p-6 md:p-8">
+          <h2 className="text-lg font-semibold">Beta testers</h2>
+          <p className="mt-2 max-w-2xl text-[15px] text-ink/55">
+            Grant a one-time 100,000 weighted-token lifetime pool. Does not reset tokens already used.
+            Recipients must have signed in to PROXY at least once.
+          </p>
+          <input
+            className="mt-4 w-full max-w-md rounded-[10px] border border-hairline bg-white px-3 py-2.5 text-[14px]"
+            type="search"
+            value={betaQuery}
+            onChange={(e) => setBetaQuery(e.target.value)}
+            placeholder="Search by name or email"
+            aria-label="Search users for beta grant"
+          />
+          {betaUsers === null ? (
+            <p className="mt-4 text-ink/50">Loading users…</p>
+          ) : (
+            <ul className="mt-4 max-h-80 divide-y divide-hairline overflow-y-auto rounded-[10px] border border-hairline">
+              {betaUsers
+                .filter((u) => {
+                  const q = betaQuery.trim().toLowerCase()
+                  if (!q) return true
+                  return (
+                    u.name.toLowerCase().includes(q) ||
+                    (u.email || '').toLowerCase().includes(q)
+                  )
+                })
+                .map((u) => (
+                  <li
+                    key={u.workosId}
+                    className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{u.name}</p>
+                      <p className="truncate text-[13px] text-ink/50">
+                        {u.email || 'No email'} · {u.weightedTokensUsed.toLocaleString()} /{' '}
+                        {u.weightedTokenLimit.toLocaleString()}
+                        {u.betaTester ? ' · Beta' : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={u.betaTester || betaGrantingId === u.workosId}
+                      className="pressable inline-flex min-h-9 shrink-0 items-center rounded-[8px] border border-hairline px-3 text-[13px] font-medium disabled:opacity-50"
+                      onClick={() => void grantBetaTester(u)}
+                    >
+                      {betaGrantingId === u.workosId
+                        ? 'Granting…'
+                        : u.betaTester
+                          ? 'Granted'
+                          : 'Grant beta'}
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
 
       <section className="card mt-4 border-red-200/80 p-6 md:p-8">
         <h2 className="text-lg font-semibold text-red-800">Delete account</h2>

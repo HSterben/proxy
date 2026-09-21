@@ -3,6 +3,7 @@ import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { generateAI, weightedTokensFromUsage, type ChatMessage } from './ai/provider';
 import { resolveAiModelWithSource } from './ai/model';
+import { withProxyIdentity } from './ai/identity';
 
 function buildMessages(args: {
   message?: string;
@@ -10,22 +11,20 @@ function buildMessages(args: {
   systemInstruction?: string;
 }): ChatMessage[] {
   let messages: ChatMessage[] = [];
+  const system = withProxyIdentity(args.systemInstruction);
 
   if (args.messages && args.messages.length > 0) {
-    messages = args.messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    messages = args.messages
+      .filter((msg) => msg.role !== 'system')
+      .map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
 
-    if (args.systemInstruction) {
-      const hasSystem = messages.some((m) => m.role === 'system');
-      if (!hasSystem) {
-        messages.unshift({
-          role: 'system',
-          content: args.systemInstruction,
-        });
-      }
-    }
+    messages.unshift({
+      role: 'system',
+      content: system,
+    });
 
     if (args.message) {
       messages.push({ role: 'user', content: args.message });
@@ -34,9 +33,7 @@ function buildMessages(args: {
     if (!args.message) {
       throw new Error('Either message or messages array must be provided');
     }
-    if (args.systemInstruction) {
-      messages.push({ role: 'system', content: args.systemInstruction });
-    }
+    messages.push({ role: 'system', content: system });
     messages.push({ role: 'user', content: args.message });
   }
 

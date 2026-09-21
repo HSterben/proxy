@@ -266,17 +266,9 @@ const ChatView = () => {
         const local = await window.electronAPI?.readPresets?.();
         if (cancelled) return;
         if (local?.success && local.presets && Object.keys(local.presets).length > 0) {
-          const account = await convex.current.query(api.account.getMyAccount, {});
-          const freeNames = new Set(
-            (account?.freeStateNames?.length
-              ? account.freeStateNames
-              : ['Simplify', 'List', 'Critique']
-            ).map((n) => n.toLowerCase()),
-          );
-          const allowAll = Boolean(account?.canCreateStates);
+          // Local cache is chat-active presets only; sync without name-gating.
           const sanitized = {};
           for (const [name, raw] of Object.entries(local.presets)) {
-            if (!allowAll && !freeNames.has(String(name).toLowerCase())) continue;
             if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
             const o = {};
             if (typeof raw.description === 'string') o.description = raw.description;
@@ -295,11 +287,6 @@ const ChatView = () => {
           }
           const next = Object.keys(sanitized).length > 0 ? sanitized : local.presets;
           setPresets(next);
-          if (Object.keys(sanitized).length > 0) {
-            await convex.current.mutation(api.states.saveMyStates, { states: sanitized });
-            await window.electronAPI?.writePresets?.(sanitized, { broadcast: true });
-            await window.electronAPI?.setPresetsOwner?.(subject);
-          }
         }
       } catch (err) {
         console.error('Failed to sync cloud states:', err);
@@ -1427,8 +1414,9 @@ const ChatView = () => {
         <div className="chat-auth-content">
           <h2>{accountGateReason || 'Free token limit reached'}</h2>
           <p>
-            Free accounts include 30,000 weighted tokens (lifetime) and three states: Simplify, List,
-            and Critique. Subscribe on the website for more tokens and custom states.
+            Free accounts include a lifetime weighted-token pool and up to 3 active States
+            (any official States). Subscribe on the website for unlimited active States and
+            publishing to the gallery.
           </p>
 
           {(accountGateReason || '').toLowerCase().includes('sign in') ||

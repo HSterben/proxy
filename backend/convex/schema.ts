@@ -10,6 +10,9 @@ export default defineSchema({
     profilePictureUrl: v.optional(v.string()),
     displayName: v.optional(v.string()),
     avatarStorageId: v.optional(v.id('_storage')),
+    /** One-time beta grant flag (100k weighted token pool). */
+    betaTester: v.optional(v.boolean()),
+    betaTesterGrantedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -71,12 +74,15 @@ export default defineSchema({
 
   /**
    * M:N library membership, one row per (user, state).
+   * `isActive` = currently selected for chat (slot-limited by plan).
    * Optional `states` / `updatedAt` remain so legacy blob rows on older
    * deployments can validate until migrateLegacyUserStates converts them.
    */
   userStates: defineTable({
     workosId: v.string(),
     stateId: v.optional(v.id('states')),
+    /** Selected for chat. Undefined treated as inactive until migration. */
+    isActive: v.optional(v.boolean()),
     states: v.optional(v.any()),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),

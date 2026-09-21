@@ -82,6 +82,17 @@ type StatePreset = {
   stop?: string | string[]
 }
 
+type LibraryItem = {
+  id: string
+  name: string
+  description: string
+  isOfficial: boolean
+  isOwner: boolean
+  isActive: boolean
+  state: StatePreset
+}
+
+
 function applyTone(systemInstruction: string, toneId: ToneId) {
   const tone = TONES.find((t) => t.id === toneId)
   if (!tone) return systemInstruction
@@ -208,8 +219,15 @@ export default function AppChat() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [messageFeedback, setMessageFeedback] = useState<Record<number, 'up' | 'down' | undefined>>({})
   const [presets, setPresets] = useState<Record<string, StatePreset>>({})
+  const [library, setLibrary] = useState<LibraryItem[]>([])
+  const [activeCount, setActiveCount] = useState(0)
+  const [activeLimit, setActiveLimit] = useState<number | null>(3)
+  const [stateTier, setStateTier] = useState<'free' | 'beta' | 'paid'>('free')
   const [activePreset, setActivePreset] = useState<string | null>(null)
   const [statesQuery, setStatesQuery] = useState('')
+  const [statePickerOpen, setStatePickerOpen] = useState(false)
+  const [slotNotice, setSlotNotice] = useState('')
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   const convex = useRef(new ConvexClient(convexUrl))
   const conversationContext = useRef<{ text: string; sender: string; images?: string[] }[]>([])
@@ -217,6 +235,20 @@ export default function AppChat() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const wasLoadingRef = useRef(false)
+
+  const startNewChat = useCallback(() => {
+    setMessages([])
+    conversationContext.current = []
+    setAttachedFiles([])
+    setInputValue('')
+    setIsLoading(false)
+    setSubscriptionRequired(false)
+    setMessageFeedback({})
+    setMainTab('chat')
+    setMenuOpen(false)
+    setStatePickerOpen(false)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }, [])
 
   const startSignIn = useCallback(() => {
     void signIn({ state: { returnTo: '/app' } })
@@ -239,6 +271,8 @@ export default function AppChat() {
     if (!user) {
       convex.current.setAuth(async () => null)
       setPresets({})
+      setLibrary([])
+      setActiveCount(0)
       setActivePreset(null)
       return
     }
@@ -254,6 +288,28 @@ export default function AppChat() {
         const cloud = await convex.current.query(api.states.getMyStates, {})
         if (cancelled) return
         setPresets((cloud?.states as Record<string, StatePreset>) || {})
+        setLibrary(
+          ((cloud?.library as LibraryItem[]) || []).map((item) => ({
+            ...item,
+            isActive: Boolean(item.isActive),
+          })),
+        )
+        setActiveCount(Number(cloud?.activeCount ?? 0))
+        setActiveLimit(
+          cloud?.activeLimit === undefined || cloud?.activeLimit === null
+            ? cloud?.tier === 'paid'
+              ? null
+              : 3
+            : Number(cloud.activeLimit),
+        )
+        setStateTier(
+          cloud?.tier === 'beta' || cloud?.tier === 'paid' ? cloud.tier : 'free',
+        )
+        setActivePreset((prev) =>
+          prev && cloud?.states && (cloud.states as Record<string, unknown>)[prev]
+            ? prev
+            : null,
+        )
       } catch (err) {
         console.error('Failed to load states:', err)
       }
@@ -296,9 +352,58 @@ export default function AppChat() {
       remaining: account?.remaining ?? 0,
       canCreateStates: Boolean(account?.canCreateStates),
       canPublishStates: Boolean(account?.canPublishStates),
-      freeStateNames: account?.freeStateNames ?? ['Simplify', 'List', 'Critique'],
+      freeStateNames: account?.freeStateNames ?? [],
+      activeStateLimit: account?.activeStateLimit ?? null,
+      stateTier: account?.stateTier ?? 'free',
     }
   }, [getAccessToken, user?.id])
+
+  const applyLibrarySnapshot = useCallback(
+    (result: {
+      states?: Record<string, StatePreset>
+      library?: LibraryItem[]
+      activeCount?: number
+      activeLimit?: number | null
+    }) => {
+      setPresets(result.states || {})
+      setLibrary(
+        (result.library || []).map((item) => ({
+          ...item,
+          isActive: Boolean(item.isActive),
+        })),
+      )
+      setActiveCount(Number(result.activeCount ?? 0))
+      if (result.activeLimit !== undefined) {
+        setActiveLimit(result.activeLimit)
+      }
+      setActivePreset((prev) => (prev && result.states?.[prev] ? prev : null))
+    },
+    [],
+  )
+
+  const toggleStateActive = useCallback(
+    async (item: LibraryItem) => {
+      setSlotNotice('')
+      setTogglingId(item.id)
+      try {
+        const result = (await convex.current.mutation(api.states.setStateActive, {
+          stateId: item.id as never,
+          active: !item.isActive,
+        })) as {
+          states: Record<string, StatePreset>
+          library: LibraryItem[]
+          activeCount: number
+          activeLimit: number | null
+        }
+        applyLibrarySnapshot(result)
+      } catch (err) {
+        setSlotNotice(userFacingError(err, 'Could not update State'))
+      } finally {
+        setTogglingId(null)
+      }
+    },
+    [applyLibrarySnapshot],
+  )
 
   const startCheckout = async (priceId: string | null) => {
     if (!priceId) return
@@ -598,6 +703,17 @@ export default function AppChat() {
       <div className="app-rail-nav">
         <button
           type="button"
+          className="app-rail-btn"
+          aria-label="New chat"
+          title="New chat"
+          onClick={startNewChat}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        <button
+          type="button"
           className={`app-rail-btn${mainTab === 'chat' ? ' is-active' : ''}`}
           aria-label="Chat"
           title="Chat"
@@ -641,12 +757,20 @@ export default function AppChat() {
     </nav>
   )
 
+  const slotsLabel =
+    activeLimit == null
+      ? `${activeCount} active`
+      : `${activeCount} / ${activeLimit} active`
+
   const statesPanel = (
     <aside className="chat-states-panel" aria-label="States">
       <p className="chat-states-drawer-title">States</p>
-      {presetNames.length === 0 ? (
+      <p className="chat-states-slots">{slotsLabel}</p>
+      {slotNotice ? <p className="chat-states-notice">{slotNotice}</p> : null}
+      {library.length === 0 ? (
         <p className="chat-sidebar-empty">
-          No synced states yet. Add states in the desktop app while signed in. They will show up here.
+          Sign in to load official States. Activate up to{' '}
+          {activeLimit ?? 'unlimited'} for chat.
         </p>
       ) : (
         <>
@@ -658,31 +782,81 @@ export default function AppChat() {
             placeholder="Search states"
             aria-label="Search states"
           />
-          <div className="chat-preset-list" role="listbox">
+          <div className="chat-preset-list">
             <button
               type="button"
-              role="option"
-              aria-selected={!activePreset}
               className={`chat-preset-item${!activePreset ? ' is-active' : ''}`}
-              onClick={() => setActivePreset(null)}
+              onClick={() => {
+                setActivePreset(null)
+                setMainTab('chat')
+                setStatePickerOpen(false)
+              }}
             >
-              Default
+              Default (no State)
             </button>
-            {presetNames
-              .filter((name) => name.toLowerCase().includes(statesQuery.trim().toLowerCase()))
-              .map((name) => (
-                <button
-                  key={name}
-                  type="button"
-                  role="option"
-                  aria-selected={activePreset === name}
-                  className={`chat-preset-item${activePreset === name ? ' is-active' : ''}`}
-                  title={presets[name]?.description || name}
-                  onClick={() => setActivePreset(name)}
-                >
-                  {name}
-                </button>
-              ))}
+            {library
+              .filter((item) =>
+                item.name.toLowerCase().includes(statesQuery.trim().toLowerCase()),
+              )
+              .map((item) => {
+                const atLimit =
+                  !item.isActive &&
+                  activeLimit != null &&
+                  activeCount >= activeLimit
+                return (
+                  <div
+                    key={item.id}
+                    className={`chat-library-row${item.isActive ? ' is-active-slot' : ''}${
+                      activePreset === item.name ? ' is-selected' : ''
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      className="chat-library-use"
+                      disabled={!item.isActive}
+                      title={
+                        item.isActive
+                          ? item.description || item.name
+                          : 'Activate this State to use it in chat'
+                      }
+                      onClick={() => {
+                        if (!item.isActive) return
+                        setActivePreset(item.name)
+                        setMainTab('chat')
+                        setStatePickerOpen(false)
+                      }}
+                    >
+                      <span className="chat-library-name">{item.name}</span>
+                      {!item.isActive ? (
+                        <span className="chat-library-badge">Inactive</span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-library-toggle"
+                      disabled={togglingId === item.id || atLimit}
+                      title={
+                        atLimit
+                          ? stateTier === 'beta'
+                            ? 'Beta accounts can have up to 5 active States.'
+                            : 'Free accounts can have up to 3 active States.'
+                          : item.isActive
+                            ? 'Deactivate'
+                            : 'Activate'
+                      }
+                      onClick={() => void toggleStateActive(item)}
+                    >
+                      {togglingId === item.id
+                        ? '…'
+                        : item.isActive
+                          ? 'On'
+                          : atLimit
+                            ? 'Full'
+                            : 'Off'}
+                    </button>
+                  </div>
+                )
+              })}
           </div>
         </>
       )}
@@ -692,22 +866,78 @@ export default function AppChat() {
   const header = (
     <header className="chat-header">
       <div className="chat-header-left">
-        <label className="chat-state-select-wrap">
-          <span className="chat-header-label">State</span>
-          <select
-            className="chat-state-select"
-            value={activePreset || ''}
-            onChange={(e) => setActivePreset(e.target.value || null)}
-            aria-label="Active state"
+        <button
+          type="button"
+          className="chat-new-chat-btn"
+          onClick={startNewChat}
+          aria-label="New chat"
+          title="New chat"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span className="chat-new-chat-label">New</span>
+        </button>
+        <div className="chat-state-picker">
+          <button
+            type="button"
+            className="chat-state-chip"
+            aria-haspopup="listbox"
+            aria-expanded={statePickerOpen}
+            onClick={() => setStatePickerOpen((v) => !v)}
           >
-            <option value="">Default</option>
-            {presetNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
+            <span className="chat-state-chip-label">State</span>
+            <span className="chat-state-chip-value">{displayState}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {statePickerOpen ? (
+            <>
+              <button
+                type="button"
+                className="chat-state-sheet-backdrop"
+                aria-label="Close state picker"
+                onClick={() => setStatePickerOpen(false)}
+              />
+              <div className="chat-state-sheet" role="listbox" aria-label="Choose a state">
+                <div className="chat-state-sheet-head">
+                  <p>Choose a state</p>
+                  <button type="button" onClick={() => setStatePickerOpen(false)} aria-label="Close">
+                    Done
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={!activePreset}
+                  className={`chat-preset-item${!activePreset ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setActivePreset(null)
+                    setStatePickerOpen(false)
+                  }}
+                >
+                  Default
+                </button>
+                {presetNames.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    role="option"
+                    aria-selected={activePreset === name}
+                    className={`chat-preset-item${activePreset === name ? ' is-active' : ''}`}
+                    onClick={() => {
+                      setActivePreset(name)
+                      setStatePickerOpen(false)
+                    }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
       </div>
       <div className="chat-header-actions">
         {user ? (
@@ -735,6 +965,9 @@ export default function AppChat() {
           </button>
           {menuOpen ? (
             <div className="chat-header-menu-panel">
+              <button type="button" onClick={startNewChat}>
+                New chat
+              </button>
               <Link to="/" onClick={() => setMenuOpen(false)}>
                 Home
               </Link>
@@ -862,7 +1095,7 @@ export default function AppChat() {
         {messages.length === 0 ? (
           <div className="chat-empty">
             <BrandMark inverted className="h-8 w-8" />
-            <p>Type a message to start chatting in PROXY Web</p>
+            <p>Type a message to start, chats are throwaway, use New anytime</p>
           </div>
         ) : (
           messages.map((msg) => (
@@ -1034,23 +1267,6 @@ export default function AppChat() {
             </svg>
           </button>
         </div>
-        <label className="chat-input-state">
-          <span className="visually-hidden">State</span>
-          <select
-            className="chat-input-state-select"
-            value={activePreset || ''}
-            onChange={(e) => setActivePreset(e.target.value || null)}
-          >
-            <option value="">{displayState}</option>
-            {presetNames
-              .filter((n) => n !== activePreset)
-              .map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-          </select>
-        </label>
       </form>
     </div>,
   )

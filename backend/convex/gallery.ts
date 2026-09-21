@@ -22,8 +22,10 @@ import {
   resolveAvatarUrl,
   resolveDisplayName,
 } from './users';
-import { requireActiveSubscription, userHasActiveSubscription } from './entitlements';
-import { isFreeStateName } from './plans';
+import {
+  requireActiveSubscription,
+  requireCanCreateStates,
+} from './entitlements';
 
 const listItemValidator = v.object({
   _id: v.id('states'),
@@ -227,11 +229,7 @@ export const publish = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Sign in to create a state');
 
-    await requireActiveSubscription(
-      ctx,
-      identity.subject,
-      'create or publish states',
-    );
+    const entitlements = await requireCanCreateStates(ctx, identity.subject);
 
     const name = args.name.trim();
     if (!name || name.length > 64) throw new Error('Name must be 1–64 characters');
@@ -251,6 +249,9 @@ export const publish = mutation({
 
     const visibility: Visibility =
       args.visibility === 'public' ? 'public' : 'private';
+    if (visibility === 'public' && !entitlements.canPublishStates) {
+      throw new Error('Subscribe to PROXY to publish states.');
+    }
 
     const user = await ensureUserFromIdentity(ctx, identity);
     const displayName = resolveDisplayName(user);
@@ -349,13 +350,6 @@ export const saveToMine = mutation({
     if (!post) throw new Error('State not found');
     if (resolveVisibility(post) !== 'public') {
       throw new Error('This state is private');
-    }
-
-    const subscribed = await userHasActiveSubscription(ctx, identity.subject);
-    if (!subscribed && !isFreeStateName(post.name)) {
-      throw new Error(
-        'Free accounts can only use Simplify, List, and Critique. Subscribe to save more states.',
-      );
     }
 
     const user = await ensureUserFromIdentity(ctx, identity);

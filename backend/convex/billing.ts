@@ -1,6 +1,7 @@
 import { internalMutation } from './_generated/server';
 import { v } from 'convex/values';
 import {
+  BETA_TESTER_WEIGHTED_TOKEN_LIMIT,
   DEFAULT_PLAN_ID,
   FREE_WEIGHTED_TOKEN_LIMIT,
   isSubscriptionActive,
@@ -24,9 +25,17 @@ export const syncEntitlements = internalMutation({
     const now = Date.now();
     const active = isSubscriptionActive(args.status);
     const plan = active ? (args.plan ?? DEFAULT_PLAN_ID) : 'free';
+
+    const user = await ctx.db
+      .query('users')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', args.workosId))
+      .first();
+
     const weightedTokenLimit = active
       ? quotaForPlan(plan, true)
-      : FREE_WEIGHTED_TOKEN_LIMIT;
+      : user?.betaTester
+        ? BETA_TESTER_WEIGHTED_TOKEN_LIMIT
+        : FREE_WEIGHTED_TOKEN_LIMIT;
 
     const sub = await ctx.db
       .query('subscriptions')
@@ -70,8 +79,15 @@ export const syncEntitlements = internalMutation({
       return null;
     }
 
+    const freeLimit = user?.betaTester
+      ? Math.max(
+          usage.weightedTokenLimit || FREE_WEIGHTED_TOKEN_LIMIT,
+          BETA_TESTER_WEIGHTED_TOKEN_LIMIT,
+        )
+      : FREE_WEIGHTED_TOKEN_LIMIT;
+
     await ctx.db.patch(usage._id, {
-      weightedTokenLimit: FREE_WEIGHTED_TOKEN_LIMIT,
+      weightedTokenLimit: freeLimit,
       updatedAt: now,
     });
     // Lapse: keep custom saves, drop paid-only official defaults.

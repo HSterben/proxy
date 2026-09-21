@@ -360,7 +360,7 @@ export default function SettingsView() {
           {section === "shortcuts" && (
             <>
               <h2>Shortcuts</h2>
-              <div className="settings-row">
+              <div className="settings-row settings-row-stack">
                 <div>
                   <div className="settings-row-label">Show or hide bubble</div>
                   <div className="settings-row-hint">Global shortcut while PROXY is running</div>

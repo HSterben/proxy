@@ -3,13 +3,13 @@ import { v } from 'convex/values';
 import { api, internal } from './_generated/api';
 import {
   DEFAULT_PLAN_ID,
-  FREE_STATE_NAMES,
   FREE_WEIGHTED_TOKEN_LIMIT,
   isSubscriptionActive,
   quotaForPlan,
   resolvePlanId,
 } from './plans';
 import { freeUserPassesSignupGate } from './signupRateLimit';
+import { resolveStateEntitlements } from './entitlements';
 
 const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -70,7 +70,11 @@ export const getMyAccount = query({
       ),
       canCreateStates: v.boolean(),
       canPublishStates: v.boolean(),
+      /** @deprecated Always empty; active slots replace forced free States. */
       freeStateNames: v.array(v.string()),
+      activeStateCount: v.number(),
+      activeStateLimit: v.union(v.number(), v.null()),
+      stateTier: v.union(v.literal('free'), v.literal('beta'), v.literal('paid')),
       websiteUrl: v.string(),
     }),
     v.null(),
@@ -108,7 +112,7 @@ export const getMyAccount = query({
         weightedTokensUsed = usageRow.weightedTokensUsed;
         weightedTokenLimit = subscriptionActive
           ? usageRow.weightedTokenLimit || defaultLimit
-          : Math.min(
+          : Math.max(
               usageRow.weightedTokenLimit || FREE_WEIGHTED_TOKEN_LIMIT,
               FREE_WEIGHTED_TOKEN_LIMIT,
             );
@@ -125,6 +129,15 @@ export const getMyAccount = query({
         ? ('signup_rate_limited' as const)
         : ('usage_limit_reached' as const);
 
+    const entitlements = await resolveStateEntitlements(ctx, workosId);
+    const memberships = await ctx.db
+      .query('userStates')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', workosId))
+      .collect();
+    const activeStateCount = memberships.filter(
+      (r) => r.stateId && r.isActive === true,
+    ).length;
+
     return {
       email: identity.email,
       subscriptionActive,
@@ -136,9 +149,12 @@ export const getMyAccount = query({
       remaining,
       canUseAI,
       blockReason,
-      canCreateStates: subscriptionActive,
-      canPublishStates: subscriptionActive,
-      freeStateNames: subscriptionActive ? [] : [...FREE_STATE_NAMES],
+      canCreateStates: entitlements.canCreateStates,
+      canPublishStates: entitlements.canPublishStates,
+      freeStateNames: [] as string[],
+      activeStateCount,
+      activeStateLimit: entitlements.activeLimit,
+      stateTier: entitlements.tier,
       websiteUrl,
     };
   },

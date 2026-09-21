@@ -67,10 +67,11 @@ function snapshotFromRow(
   }
 
   // Free / lapsed: lifetime pool, never reset.
+  // Allow stored limit above FREE when beta / manual grants raised it.
   if (!subscriptionActive) {
     return {
       weightedTokensUsed: row.weightedTokensUsed,
-      weightedTokenLimit: Math.min(
+      weightedTokenLimit: Math.max(
         row.weightedTokenLimit || FREE_WEIGHTED_TOKEN_LIMIT,
         FREE_WEIGHTED_TOKEN_LIMIT,
       ),
@@ -235,8 +236,12 @@ export const addUsage = internalMutation({
       : (existing.outputTokensUsed ?? 0) + Math.max(0, args.outputTokens);
 
     let weightedTokenLimit = existing.weightedTokenLimit || defaultLimit;
+    // Free / lapsed: keep elevated lifetime grants (e.g. beta 100k), never shrink.
     if (!subscriptionActive) {
-      weightedTokenLimit = FREE_WEIGHTED_TOKEN_LIMIT;
+      weightedTokenLimit = Math.max(
+        existing.weightedTokenLimit || FREE_WEIGHTED_TOKEN_LIMIT,
+        FREE_WEIGHTED_TOKEN_LIMIT,
+      );
     }
 
     await ctx.db.patch(existing._id, {

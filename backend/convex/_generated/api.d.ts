@@ -9,6 +9,8 @@
  */
 
 import type * as account from "../account.js";
+import type * as admin from "../admin.js";
+import type * as ai_identity from "../ai/identity.js";
 import type * as ai_model from "../ai/model.js";
 import type * as ai_provider from "../ai/provider.js";
 import type * as auth from "../auth.js";
@@ -34,6 +36,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   account: typeof account;
+  admin: typeof admin;
+  "ai/identity": typeof ai_identity;
   "ai/model": typeof ai_model;
   "ai/provider": typeof ai_provider;
   auth: typeof auth;

@@ -189,7 +189,7 @@ export const deleteUser = mutation({
  * Self-service account deletion. Requires auth + typed confirmation matching
  * "Delete my account <display name>". Removes Convex user data (profile, states,
  * library, stars, usage, subscription rows, signup claims). Does not cancel Stripe
- * or delete the WorkOS identity — cancel billing first if subscribed.
+ * or delete the WorkOS identity, cancel billing first if subscribed.
  */
 export const deleteMyAccount = mutation({
   args: {
@@ -332,6 +332,8 @@ export const getUserByWorkosId = query({
       profilePictureUrl: v.optional(v.string()),
       displayName: v.optional(v.string()),
       avatarStorageId: v.optional(v.id('_storage')),
+      betaTester: v.optional(v.boolean()),
+      betaTesterGrantedAt: v.optional(v.number()),
       createdAt: v.number(),
       updatedAt: v.number(),
     }),

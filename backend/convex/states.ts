@@ -17,9 +17,11 @@ import {
 } from './users';
 import {
   requireActiveSubscription,
+  resolveStateEntitlements,
+  activeStateLimitMessage,
   userHasActiveSubscription,
 } from './entitlements';
-import { FREE_STATE_NAMES, isFreeStateName } from './plans';
+import { LEGACY_FREE_STATE_NAMES, isFreeStateName } from './plans';
 
 /** One chat "state" (preset), flexible fields match desktop presets JSON. */
 export const stateValueValidator = v.object({
@@ -199,43 +201,29 @@ export async function upsertOfficialDefaultStates(
   return upserted;
 }
 
-/** Official IDs a user should have in-library for their plan. */
+/** All official States are available in every user's library (access ≠ active). */
 async function officialSeedIdsForPlan(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ctx: { db: any },
-  subscribed: boolean,
+  _subscribed?: boolean,
 ): Promise<Id<'states'>[]> {
   const official = await officialIdByKey(ctx);
-  if (subscribed) return [...official.values()];
-  return FREE_STATE_NAMES.map((n) => official.get(n)).filter(Boolean) as Id<'states'>[];
+  return [...official.values()];
 }
 
 /**
- * Keep free libraries limited to the three free official states, and grant every
- * official PROXY default when subscribed.
+ * Ensure every official PROXY default is in the user's library.
+ * Does not remove custom or gallery saves. Activation is separate (`isActive`).
  */
 export async function syncOfficialLibraryForPlan(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ctx: { db: any },
   workosId: string,
-  subscribed: boolean,
+  _subscribed?: boolean,
 ): Promise<Id<'states'>[]> {
   const current = await listLibraryStateIds(ctx, workosId);
-  const official = await officialIdByKey(ctx);
-  const officialIds = new Set(official.values());
-  const required = await officialSeedIdsForPlan(ctx, subscribed);
-  const requiredSet = new Set(required);
-
-  const kept: Id<'states'>[] = [];
-  for (const id of current) {
-    if (!officialIds.has(id)) {
-      kept.push(id);
-      continue;
-    }
-    if (requiredSet.has(id)) kept.push(id);
-    // Drop official states not included in this plan (fixes free users with all presets marked saved).
-  }
-
+  const required = await officialSeedIdsForPlan(ctx);
+  const kept = [...current];
   for (const id of required) {
     if (!kept.includes(id)) kept.push(id);
   }
@@ -245,7 +233,89 @@ export async function syncOfficialLibraryForPlan(
   if (changed) {
     await replaceLibraryStateIds(ctx, workosId, kept);
   }
-  return kept;
+  await ensureActiveSlots(ctx, workosId);
+  return await listLibraryStateIds(ctx, workosId);
+}
+
+async function listMembershipRows(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  workosId: string,
+): Promise<Doc<'userStates'>[]> {
+  return await ctx.db
+    .query('userStates')
+    .withIndex('by_workos_id', (q: any) => q.eq('workosId', workosId))
+    .collect();
+}
+
+async function activeMembershipCount(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  workosId: string,
+): Promise<number> {
+  const rows = await listMembershipRows(ctx, workosId);
+  return rows.filter((r) => r.stateId && r.isActive === true).length;
+}
+
+/**
+ * Migrate undefined `isActive` flags and enforce the plan's active-slot cap.
+ * Prefers the legacy free trio when first assigning actives.
+ */
+async function ensureActiveSlots(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  workosId: string,
+): Promise<void> {
+  const entitlements = await resolveStateEntitlements(ctx, workosId);
+  const rows = (await listMembershipRows(ctx, workosId)).filter((r) => r.stateId);
+  if (rows.length === 0) return;
+
+  const now = Date.now();
+  const anyFlagged = rows.some(
+    (r) => r.isActive === true || r.isActive === false,
+  );
+
+  if (!anyFlagged) {
+    const official = await officialIdByKey(ctx);
+    const preferred = new Set(
+      LEGACY_FREE_STATE_NAMES.map((n) => official.get(n))
+        .filter(Boolean)
+        .map(String),
+    );
+    const ordered = [
+      ...rows.filter((r) => preferred.has(String(r.stateId))),
+      ...rows.filter((r) => !preferred.has(String(r.stateId))),
+    ];
+    const limit =
+      entitlements.activeLimit == null
+        ? ordered.length
+        : Math.min(entitlements.activeLimit, ordered.length);
+    for (let i = 0; i < ordered.length; i++) {
+      await ctx.db.patch(ordered[i]._id, {
+        isActive: i < limit,
+        updatedAt: now,
+      });
+    }
+    return;
+  }
+
+  for (const row of rows) {
+    if (row.isActive === undefined) {
+      await ctx.db.patch(row._id, { isActive: false, updatedAt: now });
+    }
+  }
+
+  if (entitlements.activeLimit != null) {
+    const refreshed = (await listMembershipRows(ctx, workosId)).filter(
+      (r) => r.stateId && r.isActive === true,
+    );
+    if (refreshed.length > entitlements.activeLimit) {
+      refreshed.sort((a, b) => a.createdAt - b.createdAt);
+      for (const row of refreshed.slice(entitlements.activeLimit)) {
+        await ctx.db.patch(row._id, { isActive: false, updatedAt: now });
+      }
+    }
+  }
 }
 
 /** Ordered state IDs in the user's library (M:N rows only). */
@@ -369,6 +439,7 @@ async function replaceLibraryStateIds(
     await ctx.db.insert('userStates', {
       workosId,
       stateId,
+      isActive: false,
       createdAt: now,
     });
   }
@@ -390,6 +461,7 @@ export async function addLibraryMembership(
   await ctx.db.insert('userStates', {
     workosId,
     stateId,
+    isActive: false,
     createdAt: Date.now(),
   });
   return true;
@@ -536,16 +608,17 @@ export async function resolveLibraryIds(
 ): Promise<Id<'states'>[]> {
   await migrateLegacyUserStates(ctx, workosId, displayName);
 
-  const subscribed = await userHasActiveSubscription(ctx, workosId);
   const membershipIds = await listLibraryStateIds(ctx, workosId);
   if (membershipIds.length === 0) {
-    const seed = await officialSeedIdsForPlan(ctx, subscribed);
+    const seed = await officialSeedIdsForPlan(ctx);
     if (seed.length === 0) return [];
     await replaceLibraryStateIds(ctx, workosId, seed);
-    return await reconcileLibraryIds(ctx, workosId, seed);
+    const reconciled = await reconcileLibraryIds(ctx, workosId, seed);
+    await ensureActiveSlots(ctx, workosId);
+    return reconciled;
   }
 
-  const synced = await syncOfficialLibraryForPlan(ctx, workosId, subscribed);
+  const synced = await syncOfficialLibraryForPlan(ctx, workosId);
   return await reconcileLibraryIds(ctx, workosId, synced);
 }
 
@@ -556,6 +629,7 @@ const libraryItemValidator = v.object({
   visibility: v.union(v.literal('public'), v.literal('private')),
   isOfficial: v.boolean(),
   isOwner: v.boolean(),
+  isActive: v.boolean(),
   state: stateValueValidator,
 });
 
@@ -563,9 +637,14 @@ export const getMyStates = query({
   args: {},
   returns: v.union(
     v.object({
+      /** Active States only, safe for chat pickers / local chat cache. */
       states: v.record(v.string(), stateValueValidator),
       library: v.array(libraryItemValidator),
       defaultNames: v.array(v.string()),
+      activeCount: v.number(),
+      activeLimit: v.union(v.number(), v.null()),
+      tier: v.union(v.literal('free'), v.literal('beta'), v.literal('paid')),
+      canCreateStates: v.boolean(),
       updatedAt: v.optional(v.number()),
     }),
     v.null()
@@ -575,32 +654,29 @@ export const getMyStates = query({
     if (!identity) return null;
 
     const workosId = identity.subject;
-    const subscribed = await userHasActiveSubscription(ctx, workosId);
+    const entitlements = await resolveStateEntitlements(ctx, workosId);
     const official = await officialIdByKey(ctx);
     let libraryIds = await listLibraryStateIds(ctx, workosId);
 
-    // Read-only view of plan defaults (mutations live in ensureMyLibrary).
+    // Read-only: show all official when empty (mutations live in ensureMyLibrary).
     if (libraryIds.length === 0) {
-      libraryIds = await officialSeedIdsForPlan(ctx, subscribed);
+      libraryIds = await officialSeedIdsForPlan(ctx);
     } else {
-      const required = await officialSeedIdsForPlan(ctx, subscribed);
-      const officialIds = new Set(official.values());
-      const requiredSet = new Set(required);
-      const kept: Id<'states'>[] = [];
-      for (const id of libraryIds) {
-        if (!officialIds.has(id)) {
-          kept.push(id);
-          continue;
-        }
-        if (requiredSet.has(id)) kept.push(id);
-      }
+      const required = await officialSeedIdsForPlan(ctx);
+      const have = new Set(libraryIds.map(String));
       for (const id of required) {
-        if (!kept.includes(id)) kept.push(id);
+        if (!have.has(id)) libraryIds.push(id);
       }
-      libraryIds = kept;
     }
 
-    const states: Record<string, StateValue> = {};
+    const membershipByState = new Map<string, boolean>();
+    const membershipRows = await listMembershipRows(ctx, workosId);
+    for (const row of membershipRows) {
+      if (row.stateId) {
+        membershipByState.set(row.stateId, row.isActive === true);
+      }
+    }
+
     const library: Array<{
       id: Id<'states'>;
       name: string;
@@ -608,12 +684,12 @@ export const getMyStates = query({
       visibility: Visibility;
       isOfficial: boolean;
       isOwner: boolean;
+      isActive: boolean;
       state: StateValue & { visibility: Visibility; description?: string };
     }> = [];
     const usedNames = new Set<string>();
 
-    const pushDoc = (doc: Doc<'states'>) => {
-      if (!subscribed && !isFreeStateName(doc.name)) return;
+    const pushDoc = (doc: Doc<'states'>, isActive: boolean) => {
       const lower = doc.name.toLowerCase();
       const visibility = resolveVisibility(doc);
       const state = {
@@ -624,14 +700,12 @@ export const getMyStates = query({
           normalizeState(doc.state).desc ||
           doc.description,
       };
-      // Prefer official body when a private/legacy clone shares the name.
       if (usedNames.has(lower) && !doc.isOfficial) return;
       if (usedNames.has(lower) && doc.isOfficial) {
         const idx = library.findIndex((row) => row.name.toLowerCase() === lower);
         if (idx >= 0) library.splice(idx, 1);
       }
       usedNames.add(lower);
-      states[doc.name] = state;
       library.push({
         id: doc._id,
         name: doc.name,
@@ -639,22 +713,20 @@ export const getMyStates = query({
         visibility,
         isOfficial: Boolean(doc.isOfficial),
         isOwner: doc.authorWorkosId === workosId,
+        isActive,
         state,
       });
     };
 
-    // Official / resolved-official docs first so they win name collisions against stale forks.
     const officialFirst: Doc<'states'>[] = [];
     const rest: Doc<'states'>[] = [];
     for (const id of libraryIds) {
       const doc = await ctx.db.get(id);
       if (!doc) continue;
-      // Resolve replaceable private clones to the live official document.
       if (
         !doc.isOfficial &&
         isDefaultStateName(doc.name) &&
-        (matchesStockDefault(doc.name, normalizeState(doc.state)) ||
-          (!subscribed && isFreeStateName(doc.name)))
+        matchesStockDefault(doc.name, normalizeState(doc.state))
       ) {
         const officialId = official.get(doc.name);
         const officialDoc = officialId ? await ctx.db.get(officialId) : null;
@@ -666,25 +738,29 @@ export const getMyStates = query({
       if (doc.isOfficial) officialFirst.push(doc);
       else rest.push(doc);
     }
-    for (const doc of officialFirst) pushDoc(doc);
-    for (const doc of rest) pushDoc(doc);
 
-    // Guarantee free defaults are present even if library was empty/mis-seeded.
-    if (!subscribed) {
-      for (const name of FREE_STATE_NAMES) {
-        if (states[name]) continue;
-        const id = official.get(name);
-        if (!id) continue;
-        const doc = await ctx.db.get(id);
-        if (!doc) continue;
-        pushDoc(doc);
-      }
+    const seenIds = new Set<string>();
+    for (const doc of [...officialFirst, ...rest]) {
+      if (seenIds.has(doc._id)) continue;
+      seenIds.add(doc._id);
+      const isActive = membershipByState.get(doc._id) === true;
+      pushDoc(doc, isActive);
+    }
+
+    // Rebuild active states map cleanly after possible name collisions.
+    const activeStates: Record<string, StateValue> = {};
+    for (const item of library) {
+      if (item.isActive) activeStates[item.name] = item.state;
     }
 
     return {
-      states,
+      states: activeStates,
       library,
-      defaultNames: subscribed ? defaultStateNames() : [...FREE_STATE_NAMES],
+      defaultNames: defaultStateNames(),
+      activeCount: library.filter((i) => i.isActive).length,
+      activeLimit: entitlements.activeLimit,
+      tier: entitlements.tier,
+      canCreateStates: entitlements.canCreateStates,
       updatedAt: undefined,
     };
   },
@@ -703,6 +779,47 @@ export const ensureMyLibrary = mutation({
   },
 });
 
+async function buildLibraryResponse(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  workosId: string,
+  entitlements: Awaited<ReturnType<typeof resolveStateEntitlements>>,
+  updatedAt?: number,
+) {
+  const membershipByState = new Map<string, boolean>();
+  for (const row of await listMembershipRows(ctx, workosId)) {
+    if (row.stateId) membershipByState.set(row.stateId, row.isActive === true);
+  }
+  const libraryIds = await listLibraryStateIds(ctx, workosId);
+  const states: Record<string, StateValue> = {};
+  const library = [];
+  for (const id of libraryIds) {
+    const doc = await ctx.db.get(id);
+    if (!doc) continue;
+    const visibility = resolveVisibility(doc);
+    const state = { ...normalizeState(doc.state), visibility };
+    const isActive = membershipByState.get(id) === true;
+    if (isActive) states[doc.name] = state;
+    library.push({
+      id: doc._id,
+      name: doc.name,
+      description: doc.description,
+      visibility,
+      isOfficial: Boolean(doc.isOfficial),
+      isOwner: doc.authorWorkosId === workosId,
+      isActive,
+      state,
+    });
+  }
+  return {
+    states,
+    library,
+    activeCount: library.filter((i) => i.isActive).length,
+    activeLimit: entitlements.activeLimit,
+    updatedAt: updatedAt ?? Date.now(),
+  };
+}
+
 export const saveMyStates = mutation({
   args: {
     states: v.record(v.string(), stateValueValidator),
@@ -710,6 +827,8 @@ export const saveMyStates = mutation({
   returns: v.object({
     states: v.record(v.string(), stateValueValidator),
     library: v.array(libraryItemValidator),
+    activeCount: v.number(),
+    activeLimit: v.union(v.number(), v.null()),
     updatedAt: v.number(),
   }),
   handler: async (ctx, args) => {
@@ -717,31 +836,37 @@ export const saveMyStates = mutation({
     if (!identity) throw new Error('Authentication required');
 
     const workosId = identity.subject;
-    const subscribed = await userHasActiveSubscription(ctx, workosId);
+    const entitlements = await resolveStateEntitlements(ctx, workosId);
     const user = await ensureUserFromIdentity(ctx, identity);
     const displayName = resolveDisplayName(user);
     const now = Date.now();
     const incomingRaw = normalizeStates(args.states);
-    const incoming = subscribed
-      ? incomingRaw
-      : Object.fromEntries(
-          Object.entries(incomingRaw).filter(([name]) => isFreeStateName(name)),
-        );
+    const official = await officialIdByKey(ctx);
 
-    if (!subscribed) {
-      for (const [name, value] of Object.entries(incomingRaw)) {
-        if (value.visibility === 'public') {
-          throw new Error('Subscribe to PROXY to publish states.');
-        }
-        if (!isFreeStateName(name)) {
-          throw new Error(
-            'Free accounts can only use Simplify, List, and Critique. Subscribe to create more states.',
-          );
-        }
+    for (const [name, value] of Object.entries(incomingRaw)) {
+      if (value.visibility === 'public' && !entitlements.canPublishStates) {
+        throw new Error('Subscribe to PROXY to publish states.');
+      }
+      const isOfficialName = [...official.keys()].some(
+        (k) => k.toLowerCase() === name.trim().toLowerCase(),
+      );
+      if (!entitlements.canCreateStates && !isOfficialName) {
+        throw new Error(
+          'Free accounts cannot create custom States. Activate up to 3 official States, or subscribe / get beta access to create your own.',
+        );
       }
     }
 
-    const official = await officialIdByKey(ctx);
+    // Free: only touch official refs from the payload (no custom docs).
+    const incoming = entitlements.canCreateStates
+      ? incomingRaw
+      : Object.fromEntries(
+          Object.entries(incomingRaw).filter(([name]) =>
+            [...official.keys()].some(
+              (k) => k.toLowerCase() === name.trim().toLowerCase(),
+            ),
+          ),
+        );
 
     let previousIds = await resolveLibraryIds(ctx, workosId, displayName);
 
@@ -797,12 +922,9 @@ export const saveMyStates = mutation({
         }
       }
 
-      if (!subscribed) {
-        // Free: only official free-state refs, never create custom docs.
+      if (!entitlements.canCreateStates) {
         const officialId = official.get(key);
-        if (officialId && isFreeStateName(key)) {
-          nextIds.push(officialId);
-        }
+        if (officialId) nextIds.push(officialId);
         continue;
       }
 
@@ -820,8 +942,6 @@ export const saveMyStates = mutation({
         continue;
       }
 
-      // Keep gallery / official / others' states as library references.
-      // Never apply the client's visibility (or content) to someone else's doc.
       const shared = nonOwnedByName.get(lower);
       if (shared) {
         nextIds.push(shared._id);
@@ -839,83 +959,67 @@ export const saveMyStates = mutation({
       });
     }
 
-    // Ensure free users always keep the three default official states.
-    if (!subscribed) {
-      for (const name of FREE_STATE_NAMES) {
-        const id = official.get(name);
-        if (id && !nextIds.includes(id)) nextIds.push(id);
-      }
+    // Keep library members not mentioned in the payload (inactive official, etc.).
+    for (const id of previousIds) {
+      if (!nextIds.includes(id)) nextIds.push(id);
+    }
+    // Always keep every official State accessible.
+    for (const id of official.values()) {
+      if (!nextIds.includes(id)) nextIds.push(id);
     }
 
-    for (const item of pendingInserts) {
-      const wantInstr = instructionOf(item.value);
-      let renamed: Doc<'states'> | null = null;
-      if (wantInstr) {
-        for (const [ownedLower, doc] of ownedByName) {
-          if (instructionOf(normalizeState(doc.state)) === wantInstr) {
-            renamed = doc;
-            ownedByName.delete(ownedLower);
-            break;
+    if (entitlements.canCreateStates) {
+      for (const item of pendingInserts) {
+        const wantInstr = instructionOf(item.value);
+        let renamed: Doc<'states'> | null = null;
+        if (wantInstr) {
+          for (const [ownedLower, doc] of ownedByName) {
+            if (instructionOf(normalizeState(doc.state)) === wantInstr) {
+              renamed = doc;
+              ownedByName.delete(ownedLower);
+              break;
+            }
           }
+        }
+
+        if (renamed) {
+          await ctx.db.patch(renamed._id, {
+            name: item.key,
+            description: item.description,
+            state: item.stateBody,
+            visibility: item.visibility,
+            updatedAt: now,
+          });
+          nextIds.push(renamed._id);
+        } else {
+          const id = await ctx.db.insert('states', {
+            name: item.key,
+            description: item.description,
+            authorWorkosId: workosId,
+            authorDisplayName: displayName,
+            state: item.stateBody,
+            tags: [],
+            visibility: item.visibility,
+            saveCount: 0,
+            starCount: 0,
+            isOfficial: false,
+            createdAt: now,
+            updatedAt: now,
+          });
+          nextIds.push(id);
         }
       }
 
-      if (renamed) {
-        await ctx.db.patch(renamed._id, {
-          name: item.key,
-          description: item.description,
-          state: item.stateBody,
-          visibility: item.visibility,
-          updatedAt: now,
-        });
-        nextIds.push(renamed._id);
-      } else {
-        const id = await ctx.db.insert('states', {
-          name: item.key,
-          description: item.description,
-          authorWorkosId: workosId,
-          authorDisplayName: displayName,
-          state: item.stateBody,
-          tags: [],
-          visibility: item.visibility,
-          saveCount: 0,
-          starCount: 0,
-          isOfficial: false,
-          createdAt: now,
-          updatedAt: now,
-        });
-        nextIds.push(id);
-      }
-    }
-
-    for (const leftover of ownedByName.values()) {
-      if (resolveVisibility(leftover) === 'private') {
-        await ctx.db.delete(leftover._id);
+      for (const leftover of ownedByName.values()) {
+        if (resolveVisibility(leftover) === 'private') {
+          await ctx.db.delete(leftover._id);
+        }
       }
     }
 
     const reconciled = await reconcileLibraryIds(ctx, workosId, nextIds);
-
-    const states: Record<string, StateValue> = {};
-    const library = [];
-    for (const id of reconciled) {
-      const doc = await ctx.db.get(id);
-      if (!doc) continue;
-      const visibility = resolveVisibility(doc);
-      const state = { ...normalizeState(doc.state), visibility };
-      states[doc.name] = state;
-      library.push({
-        id: doc._id,
-        name: doc.name,
-        description: doc.description,
-        visibility,
-        isOfficial: Boolean(doc.isOfficial),
-        isOwner: doc.authorWorkosId === workosId,
-        state,
-      });
-    }
-
-    return { states, library, updatedAt: now };
+    await ensureActiveSlots(ctx, workosId);
+    return await buildLibraryResponse(ctx, workosId, entitlements, now);
   },
 });
 
@@ -927,12 +1031,15 @@ export const removeMyState = mutation({
   returns: v.object({
     states: v.record(v.string(), stateValueValidator),
     library: v.array(libraryItemValidator),
+    activeCount: v.number(),
+    activeLimit: v.union(v.number(), v.null()),
   }),
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Authentication required');
 
     const workosId = identity.subject;
+    const entitlements = await resolveStateEntitlements(ctx, workosId);
     const user = await ensureUserFromIdentity(ctx, identity);
     const displayName = resolveDisplayName(user);
     let libraryIds = await resolveLibraryIds(ctx, workosId, displayName);
@@ -951,16 +1058,21 @@ export const removeMyState = mutation({
     if (!targetId) throw new Error('State not found in your library');
 
     const doc = await ctx.db.get(targetId);
-    const subscribed = await userHasActiveSubscription(ctx, workosId);
-    if (
-      !subscribed &&
-      doc &&
-      (doc.isOfficial || Boolean(doc.officialKey)) &&
-      isFreeStateName(doc.name)
-    ) {
-      throw new Error(
-        'Simplify, List, and Critique stay on free accounts. Subscribe for more states.',
-      );
+    if (doc && (doc.isOfficial || Boolean(doc.officialKey))) {
+      // Official States stay accessible; deactivate instead of removing.
+      const row = await ctx.db
+        .query('userStates')
+        .withIndex('by_user_state', (q) =>
+          q.eq('workosId', workosId).eq('stateId', targetId),
+        )
+        .first();
+      if (row) {
+        await ctx.db.patch(row._id, {
+          isActive: false,
+          updatedAt: Date.now(),
+        });
+      }
+      return await buildLibraryResponse(ctx, workosId, entitlements);
     }
 
     libraryIds = libraryIds.filter((id) => id !== targetId);
@@ -975,26 +1087,71 @@ export const removeMyState = mutation({
     }
 
     await replaceLibraryStateIds(ctx, workosId, libraryIds);
+    await ensureActiveSlots(ctx, workosId);
+    return await buildLibraryResponse(ctx, workosId, entitlements);
+  },
+});
 
-    const states: Record<string, StateValue> = {};
-    const library = [];
-    for (const id of libraryIds) {
-      const d = await ctx.db.get(id);
-      if (!d) continue;
-      const visibility = resolveVisibility(d);
-      const state = { ...normalizeState(d.state), visibility };
-      states[d.name] = state;
-      library.push({
-        id: d._id,
-        name: d.name,
-        description: d.description,
-        visibility,
-        isOfficial: Boolean(d.isOfficial),
-        isOwner: d.authorWorkosId === workosId,
-        state,
+/** Activate or deactivate a library State (slot-limited by plan). Atomic. */
+export const setStateActive = mutation({
+  args: {
+    stateId: v.id('states'),
+    active: v.boolean(),
+  },
+  returns: v.object({
+    states: v.record(v.string(), stateValueValidator),
+    library: v.array(libraryItemValidator),
+    activeCount: v.number(),
+    activeLimit: v.union(v.number(), v.null()),
+    isActive: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error('Authentication required');
+
+    const workosId = identity.subject;
+    const entitlements = await resolveStateEntitlements(ctx, workosId);
+    const user = await ensureUserFromIdentity(ctx, identity);
+    await resolveLibraryIds(ctx, workosId, resolveDisplayName(user));
+
+    const doc = await ctx.db.get(args.stateId);
+    if (!doc) throw new Error('State not found');
+
+    const row = await ctx.db
+      .query('userStates')
+      .withIndex('by_user_state', (q) =>
+        q.eq('workosId', workosId).eq('stateId', args.stateId),
+      )
+      .first();
+    if (!row) throw new Error('State is not in your library');
+
+    if (args.active) {
+      if (row.isActive === true) {
+        const built = await buildLibraryResponse(ctx, workosId, entitlements);
+        return { ...built, isActive: true };
+      }
+      if (entitlements.activeLimit != null) {
+        const count = await activeMembershipCount(ctx, workosId);
+        if (count >= entitlements.activeLimit) {
+          throw new Error(activeStateLimitMessage(entitlements.tier));
+        }
+      }
+      await ctx.db.patch(row._id, {
+        isActive: true,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.db.patch(row._id, {
+        isActive: false,
+        updatedAt: Date.now(),
       });
     }
-    return { states, library };
+
+    const built = await buildLibraryResponse(ctx, workosId, entitlements);
+    return {
+      ...built,
+      isActive: args.active,
+    };
   },
 });
 
@@ -1041,13 +1198,6 @@ export const addToLibrary = mutation({
       throw new Error('This state is private');
     }
 
-    const subscribed = await userHasActiveSubscription(ctx, identity.subject);
-    if (!subscribed && !isFreeStateName(doc.name)) {
-      throw new Error(
-        'Free accounts can only use Simplify, List, and Critique. Subscribe to save more states.',
-      );
-    }
-
     const user = await ensureUserFromIdentity(ctx, identity);
     await resolveLibraryIds(ctx, identity.subject, resolveDisplayName(user));
     const added = await addLibraryMembership(ctx, identity.subject, args.stateId);
@@ -1080,6 +1230,7 @@ export const repairAuthorLibraryMemberships = mutation({
       await ctx.db.insert('userStates', {
         workosId: doc.authorWorkosId,
         stateId: doc._id,
+        isActive: false,
         createdAt: doc.createdAt,
       });
       added += 1;

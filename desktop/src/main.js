@@ -591,9 +591,10 @@ function registerKeybind() {
 let settingsWindow = null;
 let presetsWindow = null;
 let subscriptionWindow = null;
-let chatWindow = null;
-/** @type {{ message: string, images: Array<{ dataUrl: string, type: string, name: string }> } | null} */
-let pendingChatStart = null;
+/** @type {Set<import('electron').BrowserWindow>} */
+const chatWindows = new Set();
+/** Pending bootstrap payload keyed by BrowserWindow id. */
+const pendingChatStarts = new Map();
 
 function normalizeChatStartPayload(input) {
   if (input && typeof input === "object" && !Array.isArray(input)) {
@@ -612,30 +613,32 @@ function normalizeChatStartPayload(input) {
   return { message: String(input || ""), images: [] };
 }
 
+function nextChatWindowBounds(workArea) {
+  const width = Math.floor(workArea.width / 2);
+  const height = Math.floor(workArea.height * 0.6);
+  const openCount = [...chatWindows].filter((w) => !w.isDestroyed()).length;
+  const offset = (openCount % 8) * 28;
+  const x = Math.min(
+    workArea.x + Math.floor((workArea.width - width) / 2) + offset,
+    workArea.x + workArea.width - width,
+  );
+  const y = Math.min(
+    workArea.y + Math.floor((workArea.height - height) / 2) + offset,
+    workArea.y + workArea.height - height,
+  );
+  return { x, y, width, height };
+}
+
+/** Always open a new chat window so a second bubble question does not replace an existing conversation. */
 function showChatWindow(input) {
   const payload = normalizeChatStartPayload(input);
-  pendingChatStart = payload;
-
-  if (chatWindow && !chatWindow.isDestroyed()) {
-    chatWindow.webContents.send("chat-start", payload);
-    pendingChatStart = null;
-    if (!chatWindow.isVisible()) {
-      chatWindow.setOpacity(0);
-      chatWindow.show();
-      fadeIn(chatWindow);
-    }
-    chatWindow.focus();
-    return;
-  }
-
   const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } =
-    primaryDisplay.workAreaSize;
+  const workArea = primaryDisplay.workArea;
+  const bounds = nextChatWindowBounds(workArea);
   const windowIcon = getIconPath();
 
-  chatWindow = new BrowserWindow({
-    width: screenWidth / 2,
-    height: screenHeight * 0.6,
+  const win = new BrowserWindow({
+    ...bounds,
     frame: false,
     transparent: false,
     backgroundColor: "#000000",
@@ -651,39 +654,45 @@ function showChatWindow(input) {
     },
   });
 
-  chatWindow.on("close", (event) => {
-    if (!app.isQuitting) {
+  chatWindows.add(win);
+  pendingChatStarts.set(win.id, payload);
+
+  win.on("close", (event) => {
+    if (!app.isQuitting && !win.__proxyClosing) {
       event.preventDefault();
-      fadeOut(chatWindow, () => {
-        if (chatWindow && !chatWindow.isDestroyed()) chatWindow.hide();
+      win.__proxyClosing = true;
+      fadeOut(win, () => {
+        if (!win.isDestroyed()) win.destroy();
       });
     }
   });
 
-  chatWindow.on("closed", () => {
-    chatWindow = null;
+  win.on("closed", () => {
+    chatWindows.delete(win);
+    pendingChatStarts.delete(win.id);
   });
 
   // Keep images out of the URL (base64 blows past length limits). ChatView
   // claims pendingChatStart via get-pending-chat-start on mount.
   const onReady = () => {
-    chatWindow.show();
-    chatWindow.focus();
+    if (win.isDestroyed()) return;
+    win.show();
+    win.focus();
   };
 
   if (MESSAGE_WINDOW_VITE_DEV_SERVER_URL || MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     const devServerUrl =
       MESSAGE_WINDOW_VITE_DEV_SERVER_URL || MAIN_WINDOW_VITE_DEV_SERVER_URL;
-    chatWindow.loadURL(`${devServerUrl}/chat.html`);
+    win.loadURL(`${devServerUrl}/chat.html`);
   } else {
     const filePath = path.join(
       __dirname,
-      `../renderer/${MESSAGE_WINDOW_VITE_NAME}/chat.html`
+      `../renderer/${MESSAGE_WINDOW_VITE_NAME}/chat.html`,
     );
-    chatWindow.loadFile(filePath);
+    win.loadFile(filePath);
   }
 
-  chatWindow.once("ready-to-show", onReady);
+  win.once("ready-to-show", onReady);
 }
 
 function createSettingsWindow() {
@@ -1183,9 +1192,11 @@ ipcMain.handle("send-message", async (event, message) => {
   return { success: true };
 });
 
-ipcMain.handle("get-pending-chat-start", async () => {
-  const payload = pendingChatStart;
-  pendingChatStart = null;
+ipcMain.handle("get-pending-chat-start", async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return null;
+  const payload = pendingChatStarts.get(win.id) ?? null;
+  pendingChatStarts.delete(win.id);
   return payload;
 });
 
@@ -1200,16 +1211,11 @@ ipcMain.handle("hide-window", async () => {
 
 ipcMain.handle("close-message-window", async (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
-  if (window) {
-    if (chatWindow && window.id === chatWindow.id && !app.isQuitting) {
-      fadeOut(window, () => {
-        if (!window.isDestroyed()) window.hide();
-      });
-    } else {
-      fadeOut(window, () => {
-        if (!window.isDestroyed()) window.close();
-      });
-    }
+  if (window && !window.isDestroyed()) {
+    window.__proxyClosing = true;
+    fadeOut(window, () => {
+      if (!window.isDestroyed()) window.destroy();
+    });
   }
   return { success: true };
 });
@@ -1266,8 +1272,9 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   app.isQuitting = true;
-  if (chatWindow && !chatWindow.isDestroyed()) {
-    chatWindow.destroy();
-    chatWindow = null;
+  for (const win of [...chatWindows]) {
+    if (!win.isDestroyed()) win.destroy();
   }
+  chatWindows.clear();
+  pendingChatStarts.clear();
 });

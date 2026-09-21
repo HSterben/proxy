@@ -97,7 +97,6 @@ export default function States() {
   const [publishVisibility, setPublishVisibility] = useState<Visibility>('private')
   const [publishing, setPublishing] = useState(false)
   const [notice, setNotice] = useState('')
-  const [defaultNames, setDefaultNames] = useState<string[]>([])
   const [scope, setScope] = useState<ScopeFilter>('all')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -113,6 +112,12 @@ export default function States() {
   const [editAdvanced, setEditAdvanced] = useState(false)
   const [editVisibility, setEditVisibility] = useState<Visibility>('private')
   const [canPublishStates, setCanPublishStates] = useState(false)
+  const [canCreateStates, setCanCreateStates] = useState(false)
+  const [activeCount, setActiveCount] = useState(0)
+  const [activeLimit, setActiveLimit] = useState<number | null>(null)
+  const [libraryMeta, setLibraryMeta] = useState<
+    { id: string; name: string; isActive: boolean }[]
+  >([])
   const reduceMotion = useReducedMotion()
 
   const myStateNames = useMemo(() => Object.keys(myStates).sort(), [myStates])
@@ -148,6 +153,9 @@ export default function States() {
       setMyStates({})
       setMyWorkosId(null)
       setCanPublishStates(false)
+      setCanCreateStates(false)
+      setLibraryMeta([])
+      setActiveCount(0)
       return
     }
     setMyWorkosId(user.id)
@@ -160,8 +168,23 @@ export default function States() {
           convex.current.query(api.account.getMyAccount, {}),
         ])
         if (mine?.states) setMyStates(mine.states as MyStatesMap)
-        if (mine?.defaultNames) setDefaultNames(mine.defaultNames)
+        if (Array.isArray(mine?.library)) {
+          setLibraryMeta(
+            (mine.library as { id: string; name: string; isActive: boolean }[]).map(
+              (row) => ({
+                id: row.id,
+                name: row.name,
+                isActive: Boolean(row.isActive),
+              }),
+            ),
+          )
+        }
+        setActiveCount(Number(mine?.activeCount ?? 0))
+        setActiveLimit(
+          mine?.activeLimit === undefined ? null : (mine.activeLimit as number | null),
+        )
         setCanPublishStates(Boolean(account?.canPublishStates))
+        setCanCreateStates(Boolean(account?.canCreateStates ?? account?.canPublishStates))
       } catch {
         // not signed into Convex yet
       }
@@ -229,13 +252,63 @@ export default function States() {
           ...post.state,
         },
       }))
+      setLibraryMeta((prev) => {
+        if (prev.some((row) => row.id === post._id)) return prev
+        return [...prev, { id: post._id, name: post.name, isActive: false }]
+      })
       setPosts((prev) =>
         prev
           ? prev.map((p) => (p._id === post._id ? { ...p, savedByMe: true } : p))
           : prev,
       )
+      showNotice(`Saved “${result.savedAs}” (inactive until you activate it)`)
     } catch (err) {
       setError(userFacingError(err, 'Could not save state'))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const handleToggleActive = async (post: CommunityState) => {
+    if (!ensureAuth()) return
+    const meta = libraryMeta.find((row) => row.id === post._id)
+    if (!meta && !post.savedByMe && !post.isOfficial) {
+      setError('Save this State to your library before activating it.')
+      return
+    }
+    setBusyId(`active-${post._id}`)
+    setError('')
+    try {
+      const nextActive = !(meta?.isActive ?? false)
+      const result = (await convex.current.mutation(api.states.setStateActive, {
+        stateId: post._id as never,
+        active: nextActive,
+      })) as {
+        library: { id: string; name: string; isActive: boolean }[]
+        activeCount: number
+        activeLimit: number | null
+        states: MyStatesMap
+      }
+      setLibraryMeta(
+        (result.library || []).map((row) => ({
+          id: row.id,
+          name: row.name,
+          isActive: Boolean(row.isActive),
+        })),
+      )
+      setActiveCount(Number(result.activeCount ?? 0))
+      setActiveLimit(
+        result.activeLimit === undefined ? activeLimit : result.activeLimit,
+      )
+      if (result.states) setMyStates(result.states)
+      setPosts((prev) =>
+        prev
+          ? prev.map((p) => (p._id === post._id ? { ...p, savedByMe: true } : p))
+          : prev,
+      )
+      showNotice(nextActive ? `Activated “${post.name}”` : `Deactivated “${post.name}”`)
+    } catch (err) {
+      setError(userFacingError(err, 'Could not update active States'))
     } finally {
       setBusyId(null)
     }
@@ -502,24 +575,24 @@ export default function States() {
               <button
                 type="button"
                 className="pressable inline-flex min-h-11 items-center rounded-[10px] bg-black px-5 text-[15px] font-semibold text-white disabled:opacity-50"
-                disabled={Boolean(user) && !canPublishStates}
+                disabled={Boolean(user) && !canCreateStates}
                 title={
-                  user && !canPublishStates
-                    ? 'Subscribe to create or publish states'
+                  user && !canCreateStates
+                    ? 'Free accounts cannot create custom States'
                     : undefined
                 }
                 onClick={() => {
                   if (!ensureAuth()) return
-                  if (!canPublishStates) {
+                  if (!canCreateStates) {
                     setError(
-                      'Free accounts can use Simplify, List, and Critique. Subscribe to create or publish states.',
+                      'Free accounts cannot create custom States. Activate up to 3 official States, or subscribe / get beta access to create your own.',
                     )
                     return
                   }
                   setPublishOpen(true)
                 }}
               >
-                Create a state
+                {canCreateStates ? 'Create state' : 'Create (paid / beta)'}
               </button>
               <Link
                 to="/app"
@@ -812,8 +885,11 @@ export default function States() {
 
             {user && (
               <p className="text-[13px] text-ink/45">
-                {libraryCount} on your account
-                {defaultNames.length > 0 ? ' · includes defaults you can remove anytime' : ''}
+                {activeLimit == null
+                  ? `${activeCount} active`
+                  : `${activeCount} / ${activeLimit} active`}
+                {' · '}
+                {libraryCount} in library
                 {scope === 'saved' ? ' · showing saved gallery matches' : ''}
               </p>
             )}
@@ -854,10 +930,13 @@ export default function States() {
                   user && myWorkosId && post.authorWorkosId === myWorkosId && !post.isOfficial,
                 )
                 const saved = isSaved(post)
-                const freeIncluded =
-                  Boolean(post.isOfficial) &&
-                  !canPublishStates &&
-                  defaultNames.includes(post.name)
+                const libRow = libraryMeta.find((row) => row.id === post._id)
+                const isActiveSlot = Boolean(libRow?.isActive)
+                const inLibrary = saved || Boolean(libRow) || post.isOfficial
+                const atActiveLimit =
+                  !isActiveSlot &&
+                  activeLimit != null &&
+                  activeCount >= activeLimit
                 const tags = post.tags || []
 
                 return (
@@ -883,13 +962,13 @@ export default function States() {
                                 Official
                               </span>
                             )}
-                            {freeIncluded ? (
+                            {isActiveSlot ? (
                               <span className="rounded-md border border-hairline px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/55">
-                                Included
+                                Active
                               </span>
-                            ) : saved ? (
+                            ) : inLibrary ? (
                               <span className="rounded-md border border-hairline px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/55">
-                                Saved
+                                In library
                               </span>
                             ) : null}
                           </div>
@@ -944,31 +1023,48 @@ export default function States() {
                         </pre>
                       )}
                       <div className="mt-auto flex flex-wrap items-center gap-3 pt-5">
-                        {freeIncluded ? (
-                          <span className="inline-flex min-h-10 items-center rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/55">
-                            Included on free
-                          </span>
-                        ) : !canPublishStates ? (
-                          <Link
-                            to="/account/billing"
-                            className="pressable inline-flex min-h-10 items-center gap-2 rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/75"
-                          >
-                            Subscribe to unlock
-                          </Link>
-                        ) : saved ? (
-                          <button
-                            type="button"
-                            disabled={busyId === `lib-${post._id}`}
-                            className="pressable inline-flex min-h-10 items-center gap-2 rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/75 disabled:opacity-60"
-                            onClick={() => void handleRemoveMine(post)}
-                          >
-                            {busyId === `lib-${post._id}` ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <BookmarkCheck className="h-4 w-4" strokeWidth={1.5} />
-                            )}
-                            Remove from account
-                          </button>
+                        {inLibrary ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={
+                                busyId === `active-${post._id}` || atActiveLimit
+                              }
+                              title={
+                                atActiveLimit
+                                  ? activeLimit === 5
+                                    ? 'Beta accounts can have up to 5 active States.'
+                                    : 'Free accounts can have up to 3 active States.'
+                                  : undefined
+                              }
+                              className="pressable inline-flex min-h-10 items-center gap-2 rounded-[10px] bg-black px-4 text-[14px] font-semibold text-white disabled:opacity-60"
+                              onClick={() => void handleToggleActive(post)}
+                            >
+                              {busyId === `active-${post._id}` ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : null}
+                              {isActiveSlot
+                                ? 'Deactivate'
+                                : atActiveLimit
+                                  ? 'Slots full'
+                                  : 'Activate'}
+                            </button>
+                            {!post.isOfficial ? (
+                              <button
+                                type="button"
+                                disabled={busyId === `lib-${post._id}`}
+                                className="pressable inline-flex min-h-10 items-center gap-2 rounded-[10px] border border-hairline px-4 text-[14px] font-medium text-ink/75 disabled:opacity-60"
+                                onClick={() => void handleRemoveMine(post)}
+                              >
+                                {busyId === `lib-${post._id}` ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <BookmarkCheck className="h-4 w-4" strokeWidth={1.5} />
+                                )}
+                                Remove
+                              </button>
+                            ) : null}
+                          </>
                         ) : (
                           <button
                             type="button"
@@ -981,7 +1077,7 @@ export default function States() {
                             ) : (
                               <BookmarkPlus className="h-4 w-4" strokeWidth={1.5} />
                             )}
-                            Save to account
+                            Save to library
                           </button>
                         )}
                         {isMine && (

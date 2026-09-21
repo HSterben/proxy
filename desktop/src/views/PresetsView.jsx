@@ -53,6 +53,7 @@ function emptyEntry() {
     isOwner: true,
     isOfficial: false,
     stateId: null,
+    isActive: false,
   };
 }
 
@@ -205,6 +206,7 @@ function presetsToEntries(presets, previousEntries = [], library = null) {
         isOfficial: Boolean(item.isOfficial),
         stateId: item.id || null,
         visibility: item.visibility === "public" ? "public" : "private",
+        isActive: Boolean(item.isActive),
       });
     }
   }
@@ -220,16 +222,19 @@ function presetsToEntries(presets, previousEntries = [], library = null) {
             isOwner: fromLib.isOwner,
             isOfficial: fromLib.isOfficial,
             stateId: fromLib.stateId,
+            isActive: Boolean(fromLib.isActive),
           }
         : prev
           ? {
               isOwner: prev.isOwner,
               isOfficial: prev.isOfficial,
               stateId: prev.stateId,
+              isActive: Boolean(prev.isActive),
             }
-          : { isOwner: true, isOfficial: false, stateId: null };
+          : { isOwner: true, isOfficial: false, stateId: null, isActive: false };
       const row = fromRawPreset(name, v, meta);
       if (fromLib?.visibility) row.visibility = fromLib.visibility;
+      row.isActive = Boolean(meta.isActive);
       if (prev) row.id = prev.id;
       return row;
     })
@@ -252,6 +257,9 @@ export default function PresetsView() {
   const [signingIn, setSigningIn] = useState(false);
   const [canCreateStates, setCanCreateStates] = useState(true);
   const [canPublishStates, setCanPublishStates] = useState(true);
+  const [activeCount, setActiveCount] = useState(0);
+  const [activeLimit, setActiveLimit] = useState(null);
+  const [togglingId, setTogglingId] = useState(null);
 
   const showMessage = useCallback((text, isError = false) => {
     setMessage({ text, isError });
@@ -306,11 +314,34 @@ export default function PresetsView() {
               console.warn("Library migrate skipped:", migrateErr);
             }
             const cloud = await convex.current.query(convexApi.states.getMyStates, {});
-            if (cloud?.states && Object.keys(cloud.states).length > 0) {
-              presets = cloud.states;
+            if (cloud?.library?.length || (cloud?.states && Object.keys(cloud.states).length > 0)) {
               libraryMeta = cloud.library || null;
+              if (Array.isArray(libraryMeta) && libraryMeta.length > 0) {
+                presets = {};
+                for (const item of libraryMeta) {
+                  if (!item?.name || !item.state) continue;
+                  presets[item.name] = item.state;
+                }
+              } else {
+                presets = cloud.states || {};
+              }
               cloudLoaded = true;
-              await api.writePresets?.(presets, { broadcast: true });
+              setActiveCount(Number(cloud.activeCount ?? 0));
+              setActiveLimit(
+                cloud.activeLimit === undefined ? null : cloud.activeLimit,
+              );
+              // Chat cache on disk: active States only.
+              const activePresets = {};
+              if (Array.isArray(libraryMeta)) {
+                for (const item of libraryMeta) {
+                  if (item?.isActive && item.name && item.state) {
+                    activePresets[item.name] = item.state;
+                  }
+                }
+              } else {
+                Object.assign(activePresets, cloud.states || {});
+              }
+              await api.writePresets?.(activePresets, { broadcast: true });
               const subject = (() => {
                 try {
                   const parts = String(token).split('.');
@@ -500,11 +531,54 @@ export default function PresetsView() {
 
   const addEntry = () => {
     if (!canCreateStates) {
-      showMessage("Subscribe to PROXY to create custom states.", true);
+      showMessage(
+        "Free accounts cannot create custom States. Activate up to 3 official States, or subscribe / get beta access.",
+        true,
+      );
       return;
     }
     const names = entries.map((e) => e.name);
     setEntries((prev) => [...prev, { ...emptyEntry(), name: uniqueNewName(names) }]);
+  };
+
+  const toggleActive = async (entry) => {
+    if (!entry?.stateId) {
+      showMessage("Save this State to your account before activating it.", true);
+      return;
+    }
+    setTogglingId(entry.stateId);
+    try {
+      const token = await api.getAuthToken?.();
+      if (!token) {
+        showMessage("Sign in to change active States.", true);
+        return;
+      }
+      convex.current.setAuth(async () => (await api.getAuthToken?.()) ?? token);
+      const result = await convex.current.mutation(convexApi.states.setStateActive, {
+        stateId: entry.stateId,
+        active: !entry.isActive,
+      });
+      setActiveCount(Number(result.activeCount ?? 0));
+      setActiveLimit(result.activeLimit === undefined ? activeLimit : result.activeLimit);
+      const libraryMeta = result.library || [];
+      const presets = {};
+      for (const item of libraryMeta) {
+        if (item?.name && item.state) presets[item.name] = item.state;
+      }
+      setEntries((prev) => presetsToEntries(presets, prev, libraryMeta));
+      const activePresets = {};
+      for (const item of libraryMeta) {
+        if (item?.isActive && item.name && item.state) {
+          activePresets[item.name] = item.state;
+        }
+      }
+      await api.writePresets?.(activePresets, { broadcast: true });
+      fingerprintRef.current = contentFingerprint(activePresets);
+    } catch (err) {
+      showMessage(userFacingError(err, "Could not update active States."), true);
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   const validateBeforeSave = () => {
@@ -627,9 +701,14 @@ export default function PresetsView() {
               <p className="settings-hint">
                 {dirty ? "Unsaved edits · " : ""}
                 In chat, put the trigger word first, for example <code>Simplify hello</code>.
-                {canPublishStates
-                  ? " New states stay private until you turn on Make public."
-                  : " Free accounts can use Simplify, List, and Critique. Subscribe to create or publish states."}
+                {activeLimit == null
+                  ? ` ${activeCount} active (unlimited).`
+                  : ` ${activeCount} / ${activeLimit} active.`}
+                {canCreateStates
+                  ? canPublishStates
+                    ? " New states stay private until you turn on Make public."
+                    : " You can create private custom States (publishing requires a paid plan)."
+                  : " Free accounts can activate any 3 official States but cannot create custom ones."}
               </p>
             </div>
           </div>
@@ -701,6 +780,37 @@ export default function PresetsView() {
                   spellCheck={false}
                   aria-label="Trigger word"
                 />
+                <button
+                  type="button"
+                  className="btn-secondary btn-sm"
+                  disabled={
+                    !entry.stateId ||
+                    togglingId === entry.stateId ||
+                    (!entry.isActive &&
+                      activeLimit != null &&
+                      activeCount >= activeLimit)
+                  }
+                  title={
+                    !entry.stateId
+                      ? "Save to your account first"
+                      : !entry.isActive &&
+                          activeLimit != null &&
+                          activeCount >= activeLimit
+                        ? activeLimit === 5
+                          ? "Beta accounts can have up to 5 active States."
+                          : "Free accounts can have up to 3 active States."
+                        : entry.isActive
+                          ? "Deactivate for chat"
+                          : "Activate for chat"
+                  }
+                  onClick={() => void toggleActive(entry)}
+                >
+                  {togglingId === entry.stateId
+                    ? "…"
+                    : entry.isActive
+                      ? "Active"
+                      : "Inactive"}
+                </button>
                 {!entry.isOfficial && (
                   <button
                     type="button"
@@ -765,7 +875,7 @@ export default function PresetsView() {
                       {entry.isOfficial
                         ? "Built-in PROXY states stay public. You can’t change visibility."
                         : !canPublishStates
-                          ? "Free accounts can use Simplify, List, and Critique. Subscribe to publish."
+                          ? "Activate official States within your slot limit. Subscribe to publish custom States to the gallery."
                         : "Only the owner can change public or private for this state."}
                     </span>
                   </span>
@@ -853,7 +963,11 @@ export default function PresetsView() {
             className="btn-secondary"
             onClick={addEntry}
             disabled={!canCreateStates}
-            title={canCreateStates ? undefined : "Subscribe to create custom states"}
+            title={
+              canCreateStates
+                ? undefined
+                : "Free accounts cannot create custom States"
+            }
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path d="M12 5v14M5 12h14" />

@@ -37,14 +37,21 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .settings-keybind-input {
-  width: 160px;
-  min-width: 160px;
-  flex: 0 0 auto;
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 220px;
+  width: auto;
   text-align: center;
+}
+
+.settings-keybind-row .btn-secondary {
+  flex: 0 0 auto;
 }
 
 .settings-slider {

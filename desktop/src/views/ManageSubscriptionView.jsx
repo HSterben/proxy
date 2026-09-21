@@ -225,8 +225,8 @@ export default function ManageSubscriptionView() {
                     </div>
                     {!account.subscriptionActive && (
                       <p className="settings-hint" style={{ marginTop: 8 }}>
-                        Free includes 30,000 weighted tokens (no monthly reset) and Simplify, List,
-                        and Critique. Subscribe for more tokens and custom states.
+                        Free includes a lifetime weighted-token pool and up to 3 active States.
+                        Subscribe for unlimited active States, custom States, and gallery publishing.
                       </p>
                     )}
                   </div>

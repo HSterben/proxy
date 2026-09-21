@@ -2,6 +2,7 @@ import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { api, internal } from './_generated/api';
 import { getAiModelDiagnostics } from './ai/model';
+import { withProxyIdentity } from './ai/identity';
 import {
   generateAI,
   streamAI,
@@ -841,10 +842,13 @@ function processMessages(
     role: msg.role,
     content: msg.content,
   }));
-  if (systemInstruction && !processed.some((m) => m.role === 'system')) {
-    processed.unshift({ role: 'system', content: systemInstruction });
-  }
-  return processed;
+  // Drop client-supplied system messages; identity + state instruction are authoritative.
+  const withoutSystem = processed.filter((m) => m.role !== 'system');
+  withoutSystem.unshift({
+    role: 'system',
+    content: withProxyIdentity(systemInstruction),
+  });
+  return withoutSystem;
 }
 
 async function recordUsage(
