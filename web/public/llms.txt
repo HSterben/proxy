@@ -10,7 +10,7 @@
 - Privacy: https://getproxy.ca/privacy
 - Windows installer (latest): https://github.com/HSterben/Proxy/releases/latest
 - Source: https://github.com/HSterben/Proxy
-- Support email: contact@sterben.dev
+- Support email: sterben@sterben.dev
 
 ## What PROXY is
 

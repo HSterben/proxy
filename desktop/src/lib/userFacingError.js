@@ -16,15 +16,17 @@ export function userFacingError(err, fallback = 'Something went wrong. Try again
     .replace(/\bServer Error\b/gi, ' ')
     .replace(/\bUncaught Error:\s*/gi, ' ')
     .replace(/\bCalled by client\b/gi, ' ')
+    // Keep the message; drop trailing stack frames ("at handler (file:line:col)").
+    .replace(/\s+at\s+\S+\s+\([^)]*\)/g, ' ')
+    .replace(/\s+at\s+\S+$/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (
-    !text ||
-    /^[\d\s.:-]+$/.test(text) ||
-    /at\s+\S+\s+\(/i.test(text) ||
-    text.length > 280
-  ) {
+  // If a stack frame was the only remaining noise mid-string, take the first sentence-ish chunk.
+  const frameIdx = text.search(/\bat\s+\S+\s+\(/i);
+  if (frameIdx > 0) text = text.slice(0, frameIdx).trim();
+
+  if (!text || /^[\d\s.:-]+$/.test(text) || text.length > 280) {
     return fallback;
   }
 

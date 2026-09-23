@@ -10,6 +10,8 @@ import {
   shell,
   dialog,
   nativeTheme,
+  Notification,
+  session,
 } from "electron";
 import path from "node:path";
 import fs from "node:fs";
@@ -82,6 +84,7 @@ const configStore = new Store({ name: "proxy-config" });
 const PRESETS_PATH_KEY = "presetsPath";
 const PRESETS_OWNER_KEY = "presetsOwnerWorkosId";
 const KEYBIND_KEY = "keybind";
+const VOICE_KEYBIND_KEY = "voiceKeybind";
 const WINDOW_SIZE_KEY = "windowSize";
 const WINDOW_POSITION_KEY = "windowPosition";
 const THEME_KEY = "theme";
@@ -89,6 +92,9 @@ const MAX_CONTEXT_TOKENS_KEY = "maxContextTokens";
 const DEFAULT_MAX_CONTEXT_TOKENS = 12000;
 const TYPED_STATE_OVERRIDES_KEY = "typedStateOverridesDropdown";
 const DEFAULT_TYPED_STATE_OVERRIDES = true;
+const NOTIFICATIONS_ENABLED_KEY = "notificationsEnabled";
+const MIC_DEVICE_ID_KEY = "micDeviceId";
+const MIC_ENABLED_KEY = "micEnabled";
 
 const SIZE_PRESETS = {
   XSmall: 0.08,
@@ -100,7 +106,91 @@ const SIZE_PRESETS = {
 const SIZE_LABELS = ["XSmall", "Small", "Regular", "Large", "XLarge"];
 const POSITION_OPTIONS = ["bottom-right", "bottom-left", "top-right", "top-left"];
 const DEFAULT_KEYBIND = "CommandOrControl+Alt+I";
+const DEFAULT_VOICE_KEYBIND = "CommandOrControl+Alt+M";
 const MARGIN = 20;
+
+// Windows toasts need a stable AppUserModelID (packaged + dev).
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.getproxy.PROXY");
+}
+
+function formatKeybindForHumans(accel) {
+  const raw = String(accel || DEFAULT_KEYBIND);
+  const mod =
+    process.platform === "darwin" ? "⌘" : "Ctrl";
+  return raw
+    .replace(/CommandOrControl/g, mod)
+    .replace(/Command/g, "⌘")
+    .replace(/Control/g, "Ctrl")
+    .replace(/Option/g, "⌥")
+    .replace(/Alt/g, "Alt")
+    .replace(/Shift/g, "Shift")
+    .replace(/\+/g, "+");
+}
+
+function areNotificationsEnabled() {
+  return configStore.get(NOTIFICATIONS_ENABLED_KEY) !== false;
+}
+
+function getActiveKeybind() {
+  return configStore.get(KEYBIND_KEY) || DEFAULT_KEYBIND;
+}
+
+function getActiveVoiceKeybind() {
+  return configStore.get(VOICE_KEYBIND_KEY) || DEFAULT_VOICE_KEYBIND;
+}
+
+function isMicEnabled() {
+  return configStore.get(MIC_ENABLED_KEY) !== false;
+}
+
+function broadcastMicEnabledChanged() {
+  const enabled = isMicEnabled();
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) {
+      win.webContents.send("mic-enabled-changed", enabled);
+    }
+  });
+}
+
+function showStartupReadyNotification() {
+  if (!areNotificationsEnabled()) return;
+
+  const shortcut = formatKeybindForHumans(getActiveKeybind());
+  const title = "PROXY is ready";
+  const body = `Press ${shortcut} anytime to open. PROXY stays in the system tray.`;
+
+  if (Notification.isSupported()) {
+    try {
+      const notification = new Notification({
+        title,
+        body,
+        icon: getIconPath(),
+        silent: false,
+      });
+      notification.on("click", () => {
+        toggleWindow();
+      });
+      notification.show();
+      return;
+    } catch (err) {
+      console.warn("[notify] Notification failed:", err);
+    }
+  }
+
+  // Windows fallback when the Notification API is unavailable.
+  if (tray && process.platform === "win32") {
+    try {
+      tray.displayBalloon({
+        title,
+        content: body,
+        iconType: "info",
+      });
+    } catch (err) {
+      console.warn("[notify] Tray balloon failed:", err);
+    }
+  }
+}
 
 function getThemePreference() {
   const pref = configStore.get(THEME_KEY);
@@ -116,10 +206,18 @@ function resolveEffectiveTheme(preference = getThemePreference()) {
 function broadcastThemeChanged() {
   const preference = getThemePreference();
   const effective = resolveEffectiveTheme(preference);
+  const opaqueBg = effective === "light" ? "#ffffff" : "#111318";
   BrowserWindow.getAllWindows().forEach((win) => {
-    if (!win.isDestroyed()) {
-      win.webContents.send("theme-changed", { preference, effective });
+    if (win.isDestroyed()) return;
+    // Shortcut bubble stays transparent; other windows match the app chrome.
+    if (win !== mainWindow) {
+      try {
+        win.setBackgroundColor(opaqueBg);
+      } catch {
+        /* ignore */
+      }
     }
+    win.webContents.send("theme-changed", { preference, effective });
   });
 }
 
@@ -476,6 +574,9 @@ const toggleWindow = () => {
   if (mainWindow) {
     if (mainWindow.isVisible()) {
       isToggling = true;
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("stop-voice-dictation");
+      }
       fadeOut(mainWindow, () => {
         mainWindow.hide();
         isToggling = false;
@@ -497,6 +598,49 @@ const toggleWindow = () => {
       });
     }
   }
+};
+
+/** Toggle bubble; when opening, start microphone dictation. */
+const showBubbleWithVoice = () => {
+  if (isToggling || !mainWindow || mainWindow.isDestroyed()) return;
+
+  const notifyStartVoice = () => {
+    if (!isMicEnabled()) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("start-voice-dictation");
+    }
+  };
+
+  const notifyStopVoice = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("stop-voice-dictation");
+    }
+  };
+
+  if (mainWindow.isVisible()) {
+    isToggling = true;
+    notifyStopVoice();
+    fadeOut(mainWindow, () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+      isToggling = false;
+    });
+    return;
+  }
+
+  isToggling = true;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workArea;
+  const { width, height } = calculateWindowSize(workArea.width);
+  const { x, y } = getWindowPositionXY(workArea, width, height);
+  mainWindow.setBounds({ x, y, width, height });
+  mainWindow.setOpacity(0);
+  mainWindow.show();
+  mainWindow.focus();
+
+  fadeIn(mainWindow, () => {
+    isToggling = false;
+    notifyStartVoice();
+  });
 };
 
 const createTray = () => {
@@ -570,7 +714,8 @@ const createTray = () => {
     },
   ]);
 
-  tray.setToolTip("PROXY");
+  const shortcut = formatKeybindForHumans(getActiveKeybind());
+  tray.setToolTip(`PROXY | ${shortcut} to open`);
   tray.setContextMenu(contextMenu);
 
   tray.on("click", toggleWindow);
@@ -578,13 +723,45 @@ const createTray = () => {
 
 function registerKeybind() {
   globalShortcut.unregisterAll();
-  const accel = configStore.get(KEYBIND_KEY) || DEFAULT_KEYBIND;
+
+  const accel = getActiveKeybind();
   try {
     globalShortcut.register(accel, toggleWindow);
   } catch (e) {
     console.warn("Failed to register keybind:", accel, e);
     configStore.set(KEYBIND_KEY, DEFAULT_KEYBIND);
-    globalShortcut.register(DEFAULT_KEYBIND, toggleWindow);
+    try {
+      globalShortcut.register(DEFAULT_KEYBIND, toggleWindow);
+    } catch (err) {
+      console.warn("Failed to register default keybind:", err);
+    }
+  }
+
+  let voiceAccel = getActiveVoiceKeybind();
+  if (voiceAccel === getActiveKeybind()) {
+    voiceAccel = DEFAULT_VOICE_KEYBIND === getActiveKeybind()
+      ? "CommandOrControl+Alt+Shift+M"
+      : DEFAULT_VOICE_KEYBIND;
+    configStore.set(VOICE_KEYBIND_KEY, voiceAccel);
+  }
+  try {
+    globalShortcut.register(voiceAccel, showBubbleWithVoice);
+  } catch (e) {
+    console.warn("Failed to register voice keybind:", voiceAccel, e);
+    const fallback =
+      DEFAULT_VOICE_KEYBIND === getActiveKeybind()
+        ? "CommandOrControl+Alt+Shift+M"
+        : DEFAULT_VOICE_KEYBIND;
+    configStore.set(VOICE_KEYBIND_KEY, fallback);
+    try {
+      globalShortcut.register(fallback, showBubbleWithVoice);
+    } catch (err) {
+      console.warn("Failed to register default voice keybind:", err);
+    }
+  }
+
+  if (tray && !tray.isDestroyed()) {
+    tray.setToolTip(`PROXY | ${formatKeybindForHumans(getActiveKeybind())} to open`);
   }
 }
 
@@ -641,7 +818,7 @@ function showChatWindow(input) {
     ...bounds,
     frame: false,
     transparent: false,
-    backgroundColor: "#000000",
+    backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
     resizable: true,
     alwaysOnTop: false,
     skipTaskbar: false,
@@ -707,7 +884,7 @@ function createSettingsWindow() {
     show: false,
     frame: false,
     title: "PROXY Settings",
-    backgroundColor: "#000000",
+    backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
     icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -739,7 +916,7 @@ function createSubscriptionWindow() {
     show: false,
     frame: false,
     title: "PROXY, Manage Subscription",
-    backgroundColor: "#000000",
+    backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
     icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -771,7 +948,7 @@ function createPresetsWindow() {
     show: false,
     frame: false,
     title: "PROXY States",
-    backgroundColor: "#000000",
+    backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
     icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -1038,10 +1215,33 @@ ipcMain.handle("write-presets", async (_event, presets, options) => {
 // Window / keybind settings
 ipcMain.handle("get-keybind", async () => configStore.get(KEYBIND_KEY) || DEFAULT_KEYBIND);
 ipcMain.handle("set-keybind", async (_e, accel) => {
-  if (typeof accel !== "string" || !accel.trim()) return { success: false, error: "Invalid keybind" };
-  configStore.set(KEYBIND_KEY, accel.trim());
+  if (typeof accel !== "string" || !accel.trim()) return { success: false, error: "Invalid shortcut" };
+  const next = accel.trim();
+  if (next === getActiveVoiceKeybind()) {
+    return { success: false, error: "That shortcut is already used for the microphone bubble" };
+  }
+  configStore.set(KEYBIND_KEY, next);
   registerKeybind();
   return { success: true };
+});
+
+ipcMain.handle("get-voice-keybind", async () => getActiveVoiceKeybind());
+ipcMain.handle("set-voice-keybind", async (_e, accel) => {
+  if (typeof accel !== "string" || !accel.trim()) return { success: false, error: "Invalid shortcut" };
+  const next = accel.trim();
+  if (next === getActiveKeybind()) {
+    return { success: false, error: "That shortcut is already used to show or hide the bubble" };
+  }
+  configStore.set(VOICE_KEYBIND_KEY, next);
+  registerKeybind();
+  return { success: true };
+});
+
+ipcMain.handle("get-mic-enabled", async () => isMicEnabled());
+ipcMain.handle("set-mic-enabled", async (_e, enabled) => {
+  configStore.set(MIC_ENABLED_KEY, Boolean(enabled));
+  broadcastMicEnabledChanged();
+  return { success: true, enabled: isMicEnabled() };
 });
 
 function clampMaxContextTokensValue(value) {
@@ -1126,6 +1326,20 @@ ipcMain.handle("set-run-on-startup", async (_e, enabled) => {
     console.error("Set run on startup failed:", err);
     return { success: false, error: err.message };
   }
+});
+
+ipcMain.handle("get-notifications-enabled", async () => areNotificationsEnabled());
+ipcMain.handle("set-notifications-enabled", async (_e, enabled) => {
+  configStore.set(NOTIFICATIONS_ENABLED_KEY, Boolean(enabled));
+  return { success: true, enabled: areNotificationsEnabled() };
+});
+
+ipcMain.handle("get-mic-device-id", async () => String(configStore.get(MIC_DEVICE_ID_KEY) || ""));
+ipcMain.handle("set-mic-device-id", async (_e, deviceId) => {
+  const next = typeof deviceId === "string" ? deviceId.trim() : "";
+  if (next) configStore.set(MIC_DEVICE_ID_KEY, next);
+  else configStore.delete(MIC_DEVICE_ID_KEY);
+  return { success: true, deviceId: String(configStore.get(MIC_DEVICE_ID_KEY) || "") };
 });
 
 ipcMain.handle("get-theme", async () => {
@@ -1225,6 +1439,25 @@ app.whenReady().then(() => {
   createTray();
 
   registerKeybind();
+
+  // Allow microphone for speech-to-text in renderer windows.
+  try {
+    session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      if (permission === "media" || permission === "microphone") {
+        callback(true);
+        return;
+      }
+      callback(false);
+    });
+    session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+      return permission === "media" || permission === "microphone";
+    });
+  } catch (err) {
+    console.warn("[media] Permission handlers failed:", err);
+  }
+
+  // Brief delay so Windows has the tray + AppUserModelID ready for toasts.
+  setTimeout(() => showStartupReadyNotification(), 800);
 
   // Packaged builds only; needs public repo + publish with GITHUB_TOKEN.
   if (app.isPackaged) {

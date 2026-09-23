@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import Reveal from '../components/ui/Reveal'
 import { SITE_LINKS } from '../lib/site'
 
-const LAST_UPDATED = 'September 18, 2026'
+const LAST_UPDATED = 'September 21, 2026'
 
 type Section = {
   id: string
@@ -43,6 +43,7 @@ const sections: Section[] = [
     paragraphs: [
       'When you chat, your messages, attached content you upload for a request, conversation context you send, and active state instructions (system prompts / triggers) are processed so we can generate a reply.',
       'That content is transmitted to our backend and to our AI provider(s) to complete the request. Do not submit secrets, passwords, payment card numbers, or information you are not allowed to share.',
+      'If you use speech-to-text, a short audio clip from your microphone is sent to our backend and to a speech transcription provider (Whisper-compatible, such as Groq or OpenAI) to produce text for the composer. We use that audio only to generate the transcript for your request; we do not sell voice recordings or use them to train our own models.',
       'We also store PROXY “states” you create or save (trigger names, instructions, and related settings), including states you publish to the gallery when you choose to make them public.',
       'Chat transcripts may be held temporarily in your client session for continuity. We process prompts server-side to fulfill requests and to measure usage; we do not sell your prompts. Provider processing is also subject to the AI provider’s own terms and privacy practices.',
     ],
@@ -71,6 +72,7 @@ const sections: Section[] = [
       'Convex, application database, backend functions, and HTTP APIs that power accounts, states, usage, and chat endpoints',
       'WorkOS, authentication and identity (sign-in, sessions, user lifecycle events)',
       'AI providers, model inference for generating chat responses from your prompts and state instructions',
+      'Speech transcription providers (for example Groq or OpenAI Whisper) when you use the microphone to dictate',
       'Stripe, payment processing for paid plans (card details are handled by Stripe; we receive subscription and customer identifiers, plan status, and related billing metadata)',
       'Hosting and delivery providers for getproxy.ca and related infrastructure',
     ],

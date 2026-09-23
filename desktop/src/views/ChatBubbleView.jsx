@@ -7,13 +7,20 @@ import {
   resetLocalStatesToFreeDefaults,
   subjectFromAccessToken,
 } from '../lib/syncCloudStates';
+import { useSpeechToText } from '../hooks/useSpeechToText';
+import { getStoredMicDeviceId } from '../lib/speechToText';
+import { convexSiteUrl } from '../lib/convexUrls';
+import { VoiceBeam, getAudioContext } from 'voice-glow';
 import '../index.css';
 
 const api = typeof window !== 'undefined' ? window.electronAPI : null;
 const CLOUD_SYNC_MIN_MS = 8_000;
 
-function BubbleControls() {
-  const hide = () => api?.hideWindow?.();
+function BubbleControls({ onHide }) {
+  const hide = () => {
+    onHide?.();
+    api?.hideWindow?.();
+  };
   return (
     <div className="bubble-controls">
       <button type="button" className="bubble-control-btn" onClick={hide} aria-label="Hide bubble">
@@ -46,6 +53,11 @@ const ChatBubbleView = () => {
   const [activePreset, setActivePreset] = useState('');
   const [typedStateOverrides, setTypedStateOverrides] = useState(true);
   const [stateMenuOpen, setStateMenuOpen] = useState(false);
+  const [micDeviceId, setMicDeviceId] = useState(() => getStoredMicDeviceId());
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [speechNotice, setSpeechNotice] = useState('');
+  const messageRef = useRef('');
+  const dictationPrefixRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
   const syncingRef = useRef(false);
@@ -58,6 +70,128 @@ const ChatBubbleView = () => {
     setPresets(next);
     setActivePreset((prev) => (prev && next[prev] ? prev : ''));
   }, []);
+
+  useEffect(() => {
+    messageRef.current = message;
+  }, [message]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api?.getMicDeviceId?.() ?? Promise.resolve(''),
+      api?.getMicEnabled?.() ?? Promise.resolve(true),
+    ])
+      .then(([id, enabled]) => {
+        if (cancelled) return;
+        if (typeof id === 'string' && id) setMicDeviceId(id);
+        setMicEnabled(enabled !== false);
+      })
+      .catch(() => {});
+    const unsub = api?.onMicEnabledChanged?.((enabled) => {
+      setMicEnabled(enabled !== false);
+    });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, []);
+
+  const speechApplyEnabledRef = useRef(true);
+
+  const applySpeechTranscript = useCallback((transcript) => {
+    if (!speechApplyEnabledRef.current) return;
+    setSpeechNotice('');
+    const prefix = String(dictationPrefixRef.current ?? '').trimEnd();
+    setMessage(prefix ? `${prefix} ${transcript}` : transcript);
+  }, []);
+
+  const {
+    supported: speechSupported,
+    listening,
+    transcribing,
+    stream: micStream,
+    start: startSpeech,
+    cancel: cancelSpeech,
+    toggle: toggleSpeech,
+  } = useSpeechToText({
+    deviceId: micDeviceId,
+    enabled: micEnabled,
+    getAuthToken: async () => (await api?.getAuthToken?.()) ?? null,
+    transcribeUrl: `${convexSiteUrl}/openrouter/transcribe`,
+    onPartial: applySpeechTranscript,
+    onResult: (transcript) => {
+      applySpeechTranscript(transcript);
+      dictationPrefixRef.current = null;
+    },
+    onError: (msg) => {
+      if (!speechApplyEnabledRef.current) return;
+      dictationPrefixRef.current = null;
+      setSpeechNotice(String(msg || 'Speech failed.'));
+    },
+  });
+
+  const voiceTheme =
+    typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light'
+      ? 'light'
+      : 'dark';
+
+  const handleMicClick = () => {
+    if (!micEnabled) return;
+    speechApplyEnabledRef.current = true;
+    try {
+      getAudioContext();
+    } catch {
+      /* ignore */
+    }
+    toggleSpeech();
+  };
+
+  const clearSpeechSession = useCallback(() => {
+    speechApplyEnabledRef.current = false;
+    dictationPrefixRef.current = null;
+    cancelSpeech();
+    setSpeechNotice('');
+  }, [cancelSpeech]);
+
+  useEffect(() => {
+    if (!micEnabled && (listening || transcribing)) {
+      cancelSpeech();
+    }
+  }, [micEnabled, listening, transcribing, cancelSpeech]);
+
+  const listeningRef = useRef(listening);
+  const transcribingRef = useRef(transcribing);
+  listeningRef.current = listening;
+  transcribingRef.current = transcribing;
+
+  useEffect(() => {
+    const unsubStart = api?.onStartVoiceDictation?.(() => {
+      if (!micEnabled || !speechSupported || listeningRef.current || transcribingRef.current) {
+        return;
+      }
+      speechApplyEnabledRef.current = true;
+      try {
+        getAudioContext();
+      } catch {
+        /* ignore */
+      }
+      void startSpeech();
+    });
+    const unsubStop = api?.onStopVoiceDictation?.(() => {
+      clearSpeechSession();
+    });
+    return () => {
+      unsubStart?.();
+      unsubStop?.();
+    };
+  }, [micEnabled, speechSupported, startSpeech, clearSpeechSession]);
+
+  useEffect(() => {
+    if (listening) {
+      dictationPrefixRef.current = messageRef.current;
+      setSpeechNotice('');
+    }
+  }, [listening]);
 
   const syncFromCloud = useCallback(async ({ force = false } = {}) => {
     if (!api?.getAuthToken) return presetsRef.current;
@@ -215,19 +349,25 @@ const ChatBubbleView = () => {
   };
 
   const presetNames = Object.keys(presets).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-  const stateLabel = activePreset || 'Quick';
+  const stateLabel = activePreset || 'Default';
+
+  const clearComposer = useCallback(() => {
+    clearSpeechSession();
+    setMessage('');
+    setAttachedFiles([]);
+  }, [clearSpeechSession]);
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
     const messageText = message.trim();
     if (!messageText && attachedFiles.length === 0) return;
 
+    // Snapshot before clearing; drop in-flight dictation so it can't refill the bubble.
+    const filesToSend = [...attachedFiles];
+    clearComposer();
+
     // Ensure trigger matching uses the account library, not a stale disk copy.
     const latestPresets = (await syncFromCloud({ force: false })) || presets;
-
-    const filesToSend = [...attachedFiles];
-    setMessage('');
-    setAttachedFiles([]);
 
     let text = messageText;
     const firstWord = (messageText.split(/\s+/)[0] || '').replace(/\W/g, '');
@@ -265,6 +405,7 @@ const ChatBubbleView = () => {
       handleSubmit(e);
     }
     if (e.key === 'Escape') {
+      clearComposer();
       api?.hideWindow?.();
     }
   };
@@ -276,10 +417,21 @@ const ChatBubbleView = () => {
           <ProxyMark size={18} />
           <span className="bubble-brand-name">PROXY</span>
         </div>
-        <BubbleControls />
+        <BubbleControls onHide={clearSpeechSession} />
       </header>
 
-      <form className="bubble-input-box" onSubmit={handleSubmit}>
+      <form className="bubble-composer-form" onSubmit={handleSubmit}>
+        <VoiceBeam
+          className="bubble-voice-beam"
+          type="default"
+          stream={micStream}
+          processing={transcribing}
+          colorVariant="ocean"
+          theme={voiceTheme}
+          active={Boolean(micStream) || transcribing}
+          strength={0.9}
+        >
+          <div className="bubble-input-box">
         {attachedFiles.length > 0 && (
           <div className="bubble-attachments">
             {attachedFiles.map((file, idx) => (
@@ -330,9 +482,9 @@ const ChatBubbleView = () => {
             </button>
             {stateMenuOpen && (
               <div className="bubble-state-options" role="listbox" aria-label="State">
-                {[{ value: '', label: 'Quick' }, ...presetNames.map((name) => ({ value: name, label: name }))].map(({ value, label }) => (
+                {[{ value: '', label: 'Default' }, ...presetNames.map((name) => ({ value: name, label: name }))].map(({ value, label }) => (
                   <button
-                    key={value || 'quick'}
+                    key={value || 'default'}
                     type="button"
                     className={`bubble-state-option${activePreset === value ? ' is-active' : ''}`}
                     role="option"
@@ -370,6 +522,32 @@ const ChatBubbleView = () => {
             </svg>
           </button>
 
+          {speechSupported && micEnabled ? (
+            <button
+              type="button"
+              className={`bubble-mic${listening || transcribing ? ' is-listening' : ''}`}
+              onClick={handleMicClick}
+              disabled={transcribing}
+              aria-label={
+                transcribing ? 'Transcribing' : listening ? 'Stop dictation' : 'Start dictation'
+              }
+              title={
+                transcribing
+                  ? 'Transcribing…'
+                  : listening
+                    ? 'Stop and transcribe'
+                    : 'Click to speak, click again to transcribe'
+              }
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </button>
+          ) : null}
+
           {attachedFiles.length > 0 && (
             <span className="bubble-attach-badge">+{attachedFiles.length}</span>
           )}
@@ -385,6 +563,13 @@ const ChatBubbleView = () => {
             </svg>
           </button>
         </div>
+          </div>
+        </VoiceBeam>
+        {speechNotice ? (
+          <p className="bubble-speech-notice" role="status">
+            {speechNotice}
+          </p>
+        ) : null}
       </form>
     </div>
   );

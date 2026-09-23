@@ -65,7 +65,7 @@ function extractEmail(value: string): string | null {
  *   to:   SITE_LINKS.email
  * Domain must be verified on this Resend account (sterben.dev is).
  */
-const CONTACT_EMAIL = 'contact@sterben.dev'
+const CONTACT_EMAIL = 'sterben@sterben.dev'
 const DEFAULT_CONTACT_TO = CONTACT_EMAIL
 const DEFAULT_CONTACT_FROM = `PROXY <${CONTACT_EMAIL}>`
 

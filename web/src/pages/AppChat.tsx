@@ -21,6 +21,16 @@ import {
   currentTurnToApiMessage,
   historyToApiMessages,
 } from '../lib/contextBudget'
+import { ThinkingOrb } from 'thinking-orbs'
+import { useSpeechToText } from '../hooks/useSpeechToText'
+import {
+  getStoredMicDeviceId,
+  listMicrophones,
+  requestMicrophoneAccess,
+  setStoredMicDeviceId,
+  type MicDevice,
+} from '../lib/speechToText'
+import { VoiceBeam, getAudioContext } from 'voice-glow'
 import 'katex/dist/katex.min.css'
 import './app/ChatView.css'
 
@@ -33,8 +43,17 @@ const SUGGESTED_PROMPTS = [
   'What should I do next?',
 ]
 
-const DEFAULT_SYSTEM_INSTRUCTION =
-  'You are PROXY, an expert AI assistant. Be concise and helpful. Always provide clear, accurate information and assist the user to the best of your ability.'
+const DEFAULT_SYSTEM_INSTRUCTION = `You are PROXY, a sharp everyday AI assistant.
+
+Priorities:
+- Lead with the answer. Put the useful result first, then brief supporting detail only if it helps.
+- Match length to the ask: one sentence for simple questions, short bullets or steps for how-tos, deeper detail only when the user wants it.
+- Be concrete. Prefer examples, numbers, and exact wording over vague advice.
+- For ambiguous requests: make one clear assumption, state it briefly, and continue, or ask a single clarifying question if you truly cannot proceed.
+- For writing: preserve the user's intent and voice; improve clarity without fluff.
+- For code and technical help: give working steps or snippets; call out edge cases and failure points.
+- Separate fact from guess. If unsure, say so briefly and say how to verify.
+- Skip filler, apologies, and restating the question unless it adds clarity.`
 
 const TONES = [
   { id: 'concise', label: 'Concise', instruction: 'Keep answers short. Lead with the direct answer.' },
@@ -228,13 +247,128 @@ export default function AppChat() {
   const [statePickerOpen, setStatePickerOpen] = useState(false)
   const [slotNotice, setSlotNotice] = useState('')
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [micDeviceId, setMicDeviceId] = useState(() => getStoredMicDeviceId())
+  const [microphones, setMicrophones] = useState<MicDevice[]>([])
+  const [micMenuOpen, setMicMenuOpen] = useState(false)
+  const [micBusy, setMicBusy] = useState(false)
+  const [micNotice, setMicNotice] = useState('')
 
   const convex = useRef(new ConvexClient(convexUrl))
   const conversationContext = useRef<{ text: string; sender: string; images?: string[] }[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesScrollerRef = useRef<HTMLDivElement>(null)
+  const stickToBottomRef = useRef(true)
+  const ignoreScrollRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const wasLoadingRef = useRef(false)
+  const micMenuRef = useRef<HTMLDivElement>(null)
+  const inputValueRef = useRef('')
+  const dictationPrefixRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    inputValueRef.current = inputValue
+  }, [inputValue])
+
+  const applySpeechTranscript = useCallback((transcript: string) => {
+    setMicNotice('')
+    const prefix = String(dictationPrefixRef.current ?? '').trimEnd()
+    setInputValue(prefix ? `${prefix} ${transcript}` : transcript)
+  }, [])
+
+  const { supported: speechSupported, listening, transcribing, stream: micStream, toggle: toggleSpeech } = useSpeechToText({
+    deviceId: micDeviceId,
+    enabled: !isLoading,
+    getAuthToken: async () => (await getAccessToken()) || null,
+    transcribeUrl: `${convexSiteUrl}/openrouter/transcribe`,
+    onPartial: applySpeechTranscript,
+    onResult: (transcript) => {
+      applySpeechTranscript(transcript)
+      dictationPrefixRef.current = null
+    },
+    onError: (msg) => {
+      dictationPrefixRef.current = null
+      setMicNotice(msg)
+    },
+  })
+
+  const voiceTheme =
+    typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light'
+      ? 'light'
+      : 'dark'
+
+  const handleMicClick = () => {
+    try {
+      getAudioContext()
+    } catch {
+      /* ignore */
+    }
+    toggleSpeech()
+  }
+
+  useEffect(() => {
+    if (listening) {
+      dictationPrefixRef.current = inputValueRef.current
+      setMicNotice('')
+    }
+  }, [listening])
+
+  const refreshMicrophones = useCallback(async ({ requestAccess = false, preferredId = micDeviceId } = {}) => {
+    try {
+      if (requestAccess) {
+        await requestMicrophoneAccess(preferredId)
+      }
+      const list = await listMicrophones()
+      setMicrophones(list)
+      return list
+    } catch (err) {
+      setMicrophones([])
+      throw err
+    }
+  }, [micDeviceId])
+
+  useEffect(() => {
+    if (!micMenuOpen) return
+    void (async () => {
+      setMicBusy(true)
+      setMicNotice('')
+      try {
+        await refreshMicrophones({ requestAccess: true })
+      } catch (err) {
+        setMicNotice(
+          userFacingError(err, 'Couldn’t access the microphone. Allow it when your browser asks.'),
+        )
+      } finally {
+        setMicBusy(false)
+      }
+    })()
+  }, [micMenuOpen, refreshMicrophones])
+
+  useEffect(() => {
+    if (!micMenuOpen) return undefined
+    const onPointerDown = (event: MouseEvent) => {
+      if (!micMenuRef.current?.contains(event.target as Node)) {
+        setMicMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [micMenuOpen])
+
+  const handleMicDeviceChange = async (next: string) => {
+    setMicDeviceId(next)
+    setStoredMicDeviceId(next)
+    setMicBusy(true)
+    setMicNotice('')
+    try {
+      await refreshMicrophones({ requestAccess: true, preferredId: next })
+      setMicNotice(next ? 'Microphone updated.' : 'Using browser default microphone.')
+    } catch (err) {
+      setMicNotice(userFacingError(err, 'Couldn’t access that microphone.'))
+    } finally {
+      setMicBusy(false)
+    }
+  }
 
   const startNewChat = useCallback(() => {
     setMessages([])
@@ -305,11 +439,7 @@ export default function AppChat() {
         setStateTier(
           cloud?.tier === 'beta' || cloud?.tier === 'paid' ? cloud.tier : 'free',
         )
-        setActivePreset((prev) =>
-          prev && cloud?.states && (cloud.states as Record<string, unknown>)[prev]
-            ? prev
-            : null,
-        )
+        setActivePreset(null)
       } catch (err) {
         console.error('Failed to load states:', err)
       }
@@ -535,6 +665,7 @@ export default function AppChat() {
     }
 
     setIsLoading(true)
+    stickToBottomRef.current = true
     const aiMessageId = Date.now() + 1
     setMessages((prev) => [
       ...prev,
@@ -608,11 +739,43 @@ export default function AppChat() {
   }
 
   useEffect(() => {
-    const el = messagesEndRef.current
-    if (!el) return
-    const scroller = el.closest('.chat-messages')
-    if (scroller) scroller.scrollTop = scroller.scrollHeight
+    const scroller = messagesScrollerRef.current
+    if (!scroller || !stickToBottomRef.current) return
+    ignoreScrollRef.current = true
+    scroller.scrollTop = scroller.scrollHeight
+    requestAnimationFrame(() => {
+      ignoreScrollRef.current = false
+    })
   }, [messages])
+
+  useEffect(() => {
+    const scroller = messagesScrollerRef.current
+    if (!scroller) return undefined
+
+    const updateStick = () => {
+      if (ignoreScrollRef.current) return
+      const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+      stickToBottomRef.current = distance <= 48
+    }
+
+    const onScroll = () => updateStick()
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) stickToBottomRef.current = false
+    }
+    const onTouchMove = () => {
+      const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+      if (distance > 48) stickToBottomRef.current = false
+    }
+
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    scroller.addEventListener('wheel', onWheel, { passive: true })
+    scroller.addEventListener('touchmove', onTouchMove, { passive: true })
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      scroller.removeEventListener('wheel', onWheel)
+      scroller.removeEventListener('touchmove', onTouchMove)
+    }
+  }, [])
 
   // Return focus on the input
   useEffect(() => {
@@ -667,6 +830,7 @@ export default function AppChat() {
       presetName: resolvedPreset,
     }
     setMessages((prev) => [...prev, userMessage])
+    stickToBottomRef.current = true
     conversationContext.current = [
       ...conversationContext.current,
       {
@@ -792,7 +956,7 @@ export default function AppChat() {
                 setStatePickerOpen(false)
               }}
             >
-              Default (no State)
+              Default
             </button>
             {library
               .filter((item) =>
@@ -1091,7 +1255,7 @@ export default function AppChat() {
 
   return shell(
     <div className="chat-panel">
-      <div className="chat-messages">
+      <div className="chat-messages" ref={messagesScrollerRef}>
         {messages.length === 0 ? (
           <div className="chat-empty">
             <BrandMark inverted className="h-8 w-8" />
@@ -1101,7 +1265,11 @@ export default function AppChat() {
           messages.map((msg) => (
             <div key={msg.id} className={`message message-${msg.sender}`}>
               <div className="message-body">
-                <div className="message-bubble">
+                <div
+                  className={`message-bubble${
+                    msg.isStreaming && !msg.text ? ' is-thinking' : ''
+                  }`}
+                >
                   {msg.sender === 'user' && msg.presetName ? (
                     <span className="message-preset-indicator">{msg.presetName}</span>
                   ) : null}
@@ -1118,14 +1286,21 @@ export default function AppChat() {
                         msg.sender === 'ai' && !msg.isStreaming ? ' message-text-markdown' : ''
                       }${msg.isStreaming ? ' message-text-streaming' : ''}`}
                     >
-                      {msg.sender === 'ai' && !msg.isStreaming ? (
+                      {msg.isStreaming && !msg.text ? (
+                        <span className="message-thinking" aria-live="polite" aria-label="Thinking">
+                          <span className="message-thinking-orb" aria-hidden>
+                            <ThinkingOrb state="composing" size={64} theme="auto" />
+                          </span>
+                          <span className="message-thinking-label">Thinking....</span>
+                        </span>
+                      ) : msg.sender === 'ai' && !msg.isStreaming ? (
                         <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>
                           {normalizeAiMarkdown(msg.text || '')}
                         </ReactMarkdown>
                       ) : (
                         msg.text
                       )}
-                      {msg.isStreaming ? <span className="streaming-cursor">▋</span> : null}
+                      {msg.isStreaming && msg.text ? <span className="streaming-cursor">▋</span> : null}
                     </div>
                   )}
                 </div>
@@ -1201,7 +1376,18 @@ export default function AppChat() {
         </div>
       ) : null}
 
-      <form className="chat-input-container" onSubmit={(e) => void handleSubmit(e)}>
+      <form className="chat-composer-form" onSubmit={(e) => void handleSubmit(e)}>
+        <VoiceBeam
+          className="chat-voice-beam"
+          type="default"
+          stream={micStream}
+          processing={isLoading || transcribing}
+          colorVariant="ocean"
+          theme={voiceTheme}
+          active={Boolean(micStream) || isLoading || transcribing}
+          strength={0.9}
+        >
+          <div className="chat-input-container">
         {attachedFiles.length > 0 ? (
           <div className="chat-attachments" aria-label="Attachments">
             {attachedFiles.map((fileData, idx) => (
@@ -1246,11 +1432,72 @@ export default function AppChat() {
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
+          {speechSupported ? (
+            <div className="chat-mic-wrap" ref={micMenuRef}>
+              <button
+                type="button"
+                className={`chat-mic-button${listening || transcribing ? ' is-listening' : ''}`}
+                onClick={handleMicClick}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setMicMenuOpen((open) => !open)
+                }}
+                disabled={isLoading || transcribing}
+                aria-label={
+                  transcribing ? 'Transcribing' : listening ? 'Stop dictation' : 'Start dictation'
+                }
+                title={
+                  transcribing
+                    ? 'Transcribing…'
+                    : listening
+                      ? 'Stop and transcribe'
+                      : 'Click to speak, click again to transcribe · right-click for mic settings'
+                }
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+              </button>
+              {micMenuOpen ? (
+                <div className="chat-mic-menu" role="dialog" aria-label="Microphone settings">
+                  <div className="chat-mic-menu-label">Microphone</div>
+                  <select
+                    className="select-field"
+                    value={micDeviceId}
+                    onChange={(e) => void handleMicDeviceChange(e.target.value)}
+                    disabled={micBusy}
+                  >
+                    <option value="">Browser default</option>
+                    {microphones.map((mic) => (
+                      <option key={mic.deviceId} value={mic.deviceId}>
+                        {mic.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="chat-mic-menu-hint">
+                    {micBusy
+                      ? 'Requesting microphone access…'
+                      : 'Right-click the mic for settings. Click the mic to record, click again to transcribe.'}
+                  </p>
+                  {micNotice ? <p className="chat-mic-menu-hint">{micNotice}</p> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <input
             ref={inputRef}
             type="text"
             className="chat-input-field"
-            placeholder="Message PROXY…"
+            placeholder={
+              transcribing
+                ? 'Transcribing…'
+                : listening
+                  ? 'Listening… text updates as you speak'
+                  : 'Message PROXY…'
+            }
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             disabled={isLoading}
@@ -1267,6 +1514,8 @@ export default function AppChat() {
             </svg>
           </button>
         </div>
+          </div>
+        </VoiceBeam>
       </form>
     </div>,
   )

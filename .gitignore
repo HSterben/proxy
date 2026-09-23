@@ -75,8 +75,9 @@ builder-effective-config.yaml
 **/.env
 **/.env.local
 **/.env.*
+# Keep safe templates trackable (negations must follow the ignore patterns)
 !.env.example
-**/.env.example
+!**/.env.example
 
 # API Keys & Secrets
 *.key
@@ -418,6 +419,8 @@ design-system/
 AGENTS.local.md
 CLAUDE.local.md
 GEMINI.local.md
+AGENTS.md
+README.md
 .claude/settings.local.json
 .aider.chat.history.md
 .aider.input.history

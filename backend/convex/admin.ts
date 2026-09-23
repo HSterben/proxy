@@ -1,4 +1,5 @@
 import { mutation, query } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import { v } from 'convex/values';
 import {
   BETA_TESTER_WEIGHTED_TOKEN_LIMIT,
@@ -7,11 +8,18 @@ import {
 import { ensureFreeUsageRow } from './signupRateLimit';
 import { nameFromParts, resolveDisplayName } from './users';
 
-/** Comma-separated admin emails (WorkOS identity email). */
+type IdentityLike = {
+  subject: string;
+  email?: string | null;
+  email_address?: string | null;
+};
+
+/** Admin if listed in ADMIN_EMAILS, or any @sterben.dev address. */
 function adminEmails(): Set<string> {
+  // Bracket access avoids any static env inlining at bundle time.
   const raw =
-    process.env.ADMIN_EMAILS?.trim() ||
-    'contact@sterben.dev,hxdisterben@gmail.com';
+    process.env['ADMIN_EMAILS']?.trim() ||
+    'sterben@sterben.dev,hxdisterben@gmail.com';
   return new Set(
     raw
       .split(',')
@@ -20,25 +28,61 @@ function adminEmails(): Set<string> {
   );
 }
 
-async function requireAdmin(ctx: {
-  auth: { getUserIdentity: () => Promise<{ email?: string | null; subject: string } | null> };
-}) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error('Sign in required');
-  const email = identity.email?.trim().toLowerCase();
-  if (!email || !adminEmails().has(email)) {
+function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const normalized = email.trim().toLowerCase();
+  if (adminEmails().has(normalized)) return true;
+  return normalized.endsWith('@sterben.dev');
+}
+
+function emailFromIdentity(identity: IdentityLike | null | undefined): string | null {
+  if (!identity) return null;
+  const direct =
+    (typeof identity.email === 'string' && identity.email.trim()) ||
+    (typeof identity.email_address === 'string' && identity.email_address.trim()) ||
+    '';
+  return direct ? direct.toLowerCase() : null;
+}
+
+/**
+ * WorkOS JWTs often omit email on the Convex identity. Prefer the token claim,
+ * then fall back to the users row for this subject.
+ */
+async function resolveCallerEmail(ctx: QueryCtx | MutationCtx): Promise<{
+  identity: IdentityLike;
+  email: string | null;
+} | null> {
+  const identity = (await ctx.auth.getUserIdentity()) as IdentityLike | null;
+  if (!identity) return null;
+
+  let email = emailFromIdentity(identity);
+  if (!email) {
+    const user = await ctx.db
+      .query('users')
+      .withIndex('by_workos_id', (q) => q.eq('workosId', identity.subject))
+      .first();
+    email = user?.email?.trim().toLowerCase() || null;
+  }
+
+  return { identity, email };
+}
+
+async function requireAdmin(ctx: QueryCtx | MutationCtx) {
+  const resolved = await resolveCallerEmail(ctx);
+  if (!resolved) throw new Error('Sign in required');
+  if (!isAdminEmail(resolved.email)) {
     throw new Error('Admin access required');
   }
-  return identity;
+  return resolved.identity;
 }
 
 export const amIAdmin = query({
   args: {},
   returns: v.boolean(),
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    const email = identity?.email?.trim().toLowerCase();
-    return Boolean(email && adminEmails().has(email));
+    const resolved = await resolveCallerEmail(ctx);
+    if (!resolved) return false;
+    return isAdminEmail(resolved.email);
   },
 });
 

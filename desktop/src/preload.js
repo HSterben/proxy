@@ -58,6 +58,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Settings: keybind, window size/position
   getKeybind: () => ipcRenderer.invoke('get-keybind'),
   setKeybind: (accel) => ipcRenderer.invoke('set-keybind', accel),
+  getVoiceKeybind: () => ipcRenderer.invoke('get-voice-keybind'),
+  setVoiceKeybind: (accel) => ipcRenderer.invoke('set-voice-keybind', accel),
+  getMicEnabled: () => ipcRenderer.invoke('get-mic-enabled'),
+  setMicEnabled: (enabled) => ipcRenderer.invoke('set-mic-enabled', enabled),
+  onMicEnabledChanged: (callback) => {
+    const handler = (_event, enabled) => callback(enabled);
+    ipcRenderer.on('mic-enabled-changed', handler);
+    return () => ipcRenderer.removeListener('mic-enabled-changed', handler);
+  },
+  onStartVoiceDictation: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('start-voice-dictation', handler);
+    return () => ipcRenderer.removeListener('start-voice-dictation', handler);
+  },
+  onStopVoiceDictation: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('stop-voice-dictation', handler);
+    return () => ipcRenderer.removeListener('stop-voice-dictation', handler);
+  },
   getMaxContextTokens: () => ipcRenderer.invoke('get-max-context-tokens'),
   setMaxContextTokens: (value) => ipcRenderer.invoke('set-max-context-tokens', value),
   onMaxContextTokensChanged: (callback) => {
@@ -81,6 +100,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getRunOnStartup: () => ipcRenderer.invoke('get-run-on-startup'),
   setRunOnStartup: (enabled) => ipcRenderer.invoke('set-run-on-startup', enabled),
+
+  getNotificationsEnabled: () => ipcRenderer.invoke('get-notifications-enabled'),
+  setNotificationsEnabled: (enabled) => ipcRenderer.invoke('set-notifications-enabled', enabled),
+
+  getMicDeviceId: () => ipcRenderer.invoke('get-mic-device-id'),
+  setMicDeviceId: (deviceId) => ipcRenderer.invoke('set-mic-device-id', deviceId),
 
   closeWindow: () => ipcRenderer.invoke('close-window'),
   minimizeWindow: () => ipcRenderer.invoke('minimize-window'),

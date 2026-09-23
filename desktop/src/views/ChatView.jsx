@@ -26,10 +26,14 @@ import {
   currentTurnToApiMessage,
   historyToApiMessages,
 } from '../lib/contextBudget';
+import { ThinkingOrb } from 'thinking-orbs';
+import { useSpeechToText } from '../hooks/useSpeechToText';
+import { getStoredMicDeviceId } from '../lib/speechToText';
+import { VoiceBeam, getAudioContext } from 'voice-glow';
 import 'katex/dist/katex.min.css';
 import './ChatView.css';
 
-// ——— Constants ———
+// --- Constants ---
 const CONVEX_URL = convexUrl;
 const CONVEX_SITE_BASE = convexSiteUrl;
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
@@ -38,9 +42,18 @@ const ACCOUNT_ACCESS_TTL_MS = 30_000;
 
 const getConvexSiteBaseUrl = () => CONVEX_SITE_BASE;
 
-const DEFAULT_SYSTEM_INSTRUCTION =
-  'You are PROXY. Answer clearly and accurately. Keep replies as short as the question allows.'
-// Model is chosen on the server (Convex `openrouter_model_name` env). Client does not send it.
+/** Built-in everyday mode when no State is selected in the dropdown. */
+const DEFAULT_SYSTEM_INSTRUCTION = `You are PROXY, a sharp everyday AI assistant.
+
+Priorities:
+- Lead with the answer. Put the useful result first, then brief supporting detail only if it helps.
+- Match length to the ask: one sentence for simple questions, short bullets or steps for how-tos, deeper detail only when the user wants it.
+- Be concrete. Prefer examples, numbers, and exact wording over vague advice.
+- For ambiguous requests: make one clear assumption, state it briefly, and continue, or ask a single clarifying question if you truly cannot proceed.
+- For writing: preserve the user's intent and voice; improve clarity without fluff.
+- For code and technical help: give working steps or snippets; call out edge cases and failure points.
+- Separate fact from guess. If unsure, say so briefly and say how to verify.
+- Skip filler, apologies, and restating the question unless it adds clarity.`;
 
 const TONES = [
   { id: 'concise', label: 'Concise', instruction: 'Keep answers short. Lead with the direct answer.' },
@@ -79,7 +92,7 @@ const MessageRow = memo(function MessageRow({ msg, feedback, onCopy, onFeedback 
   return (
     <div className={`message message-${msg.sender}`}>
       <div className="message-body">
-        <div className="message-bubble">
+        <div className={`message-bubble${msg.isStreaming && !msg.text ? ' is-thinking' : ''}`}>
           {msg.sender === 'user' && msg.presetName && (
             <span className="message-preset-indicator" title={`State: ${msg.presetName}`}>
               <span className="message-preset-indicator-label">{msg.presetName}</span>
@@ -106,7 +119,14 @@ const MessageRow = memo(function MessageRow({ msg, feedback, onCopy, onFeedback 
           )}
           {(msg.text || msg.isStreaming) && (
             <div className={`message-text${showMarkdown ? ' message-text-markdown' : ''}${msg.isStreaming ? ' message-text-streaming' : ''}`}>
-              {showMarkdown ? (
+              {msg.isStreaming && !msg.text ? (
+                <span className="message-thinking" aria-live="polite" aria-label="Thinking">
+                  <span className="message-thinking-orb" aria-hidden>
+                    <ThinkingOrb state="composing" size={64} theme="auto" />
+                  </span>
+                  <span className="message-thinking-label">Thinking....</span>
+                </span>
+              ) : showMarkdown ? (
                 <ReactMarkdown
                   remarkPlugins={REMARK_PLUGINS}
                   rehypePlugins={REHYPE_PLUGINS}
@@ -134,7 +154,7 @@ const MessageRow = memo(function MessageRow({ msg, feedback, onCopy, onFeedback 
               ) : (
                 msg.text
               )}
-              {msg.isStreaming && <span className="streaming-cursor">▋</span>}
+              {msg.isStreaming && msg.text ? <span className="streaming-cursor">▋</span> : null}
             </div>
           )}
         </div>
@@ -204,6 +224,98 @@ const ChatView = () => {
   const accountCacheRef = useRef({ at: 0, result: null });
   const streamBufRef = useRef({ id: null, text: '', raf: 0 });
   const stickToBottomRef = useRef(true);
+  const ignoreScrollRef = useRef(false);
+  const [micDeviceId, setMicDeviceId] = useState(() => getStoredMicDeviceId());
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [speechNotice, setSpeechNotice] = useState('');
+  const inputValueRef = useRef('');
+  const dictationPrefixRef = useRef(null);
+
+  useEffect(() => {
+    inputValueRef.current = inputValue;
+  }, [inputValue]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      window.electronAPI?.getMicDeviceId?.() ?? Promise.resolve(''),
+      window.electronAPI?.getMicEnabled?.() ?? Promise.resolve(true),
+    ])
+      .then(([id, enabled]) => {
+        if (cancelled) return;
+        if (typeof id === 'string' && id) setMicDeviceId(id);
+        setMicEnabled(enabled !== false);
+      })
+      .catch(() => {});
+    const unsub = window.electronAPI?.onMicEnabledChanged?.((enabled) => {
+      setMicEnabled(enabled !== false);
+    });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, []);
+
+  const applySpeechTranscript = useCallback((transcript) => {
+    setSpeechNotice('');
+    const prefix = String(dictationPrefixRef.current ?? '').trimEnd();
+    setInputValue(prefix ? `${prefix} ${transcript}` : transcript);
+  }, []);
+
+  const {
+    supported: speechSupported,
+    listening,
+    transcribing,
+    stream: micStream,
+    stop: stopSpeech,
+    toggle: toggleSpeech,
+  } = useSpeechToText({
+    deviceId: micDeviceId,
+    enabled: micEnabled && !isLoading,
+    getAuthToken: async () => (await window.electronAPI?.getAuthToken?.()) ?? null,
+    transcribeUrl: `${getConvexSiteBaseUrl()}/openrouter/transcribe`,
+    onPartial: applySpeechTranscript,
+    onResult: (transcript) => {
+      applySpeechTranscript(transcript);
+      dictationPrefixRef.current = null;
+    },
+    onError: (msg) => {
+      dictationPrefixRef.current = null;
+      setSpeechNotice(String(msg || 'Speech failed.'));
+    },
+  });
+
+  useEffect(() => {
+    if (!micEnabled && (listening || transcribing)) {
+      void stopSpeech();
+    }
+  }, [micEnabled, listening, transcribing, stopSpeech]);
+
+  const voiceTheme =
+    typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light'
+      ? 'light'
+      : 'dark';
+
+  const handleMicClick = () => {
+    try {
+      getAudioContext();
+    } catch {
+      /* Safari / locked audio contexts */
+    }
+    toggleSpeech();
+  };
+
+  useEffect(() => {
+    if (listening) {
+      dictationPrefixRef.current = inputValueRef.current;
+      setSpeechNotice('');
+    }
+  }, [listening]);
+
+  useEffect(() => {
+    if (!listening && !transcribing) return;
+    setSpeechNotice('');
+  }, [listening, transcribing]);
 
   useEffect(() => {
     sessionOptionsRef.current = null;
@@ -229,13 +341,14 @@ const ChatView = () => {
     isAuthenticatedRef.current = isAuthenticated;
   }, [isAuthenticated]);
 
-  // ——— Effects ———
+  // --- Effects ---
   useEffect(() => {
     if (typeof window !== 'undefined' && window.electronAPI?.readPresets) {
       window.electronAPI
         .readPresets()
         .then((result) => {
           if (result?.success && result.presets) setPresets(result.presets);
+          setActivePreset(null);
         })
         .catch((err) => console.error('Failed to load presets:', err));
     }
@@ -260,7 +373,7 @@ const ChatView = () => {
         if (cancelled) return;
         if (cloud) {
           setPresets(cloud);
-          setActivePreset((prev) => (prev && cloud[prev] ? prev : null));
+          setActivePreset(null);
           return;
         }
         const local = await window.electronAPI?.readPresets?.();
@@ -883,6 +996,8 @@ const ChatView = () => {
 
     setIsLoading(true);
 
+    stickToBottomRef.current = true;
+
     const aiMessageId = Date.now() + 1;
     const aiMessage = {
       id: aiMessageId,
@@ -1198,18 +1313,44 @@ const ChatView = () => {
   useEffect(() => {
     const scroller = messagesScrollerRef.current;
     if (!scroller || !stickToBottomRef.current) return;
+    ignoreScrollRef.current = true;
     scroller.scrollTop = scroller.scrollHeight;
+    requestAnimationFrame(() => {
+      ignoreScrollRef.current = false;
+    });
   }, [messages]);
 
   useEffect(() => {
     const scroller = messagesScrollerRef.current;
     if (!scroller) return undefined;
-    const onScroll = () => {
+
+    const updateStick = () => {
+      if (ignoreScrollRef.current) return;
       const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-      stickToBottomRef.current = distance < 80;
+      stickToBottomRef.current = distance <= 48;
     };
+
+    const unpinIfScrollingUp = (deltaY) => {
+      if (deltaY < 0) stickToBottomRef.current = false;
+    };
+
+    const onScroll = () => updateStick();
+    const onWheel = (e) => unpinIfScrollingUp(e.deltaY);
+    const onTouchMove = () => {
+      // Any touch drag while content is growing should respect the user.
+      // Re-evaluate after the move via scroll; unpin immediately if not near bottom.
+      const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      if (distance > 48) stickToBottomRef.current = false;
+    };
+
     scroller.addEventListener('scroll', onScroll, { passive: true });
-    return () => scroller.removeEventListener('scroll', onScroll);
+    scroller.addEventListener('wheel', onWheel, { passive: true });
+    scroller.addEventListener('touchmove', onTouchMove, { passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', onScroll);
+      scroller.removeEventListener('wheel', onWheel);
+      scroller.removeEventListener('touchmove', onTouchMove);
+    };
   }, []);
 
   useEffect(() => {
@@ -1375,6 +1516,7 @@ const ChatView = () => {
     };
     
     setMessages(prev => [...prev, userMessage]);
+    stickToBottomRef.current = true;
     
     // Update conversation context
     conversationContext.current = [
@@ -1575,7 +1717,18 @@ const ChatView = () => {
           </div>
         )}
 
-        <form className="chat-input-container" onSubmit={handleSubmit}>
+        <form className="chat-composer-form" onSubmit={handleSubmit}>
+          <VoiceBeam
+            className="chat-voice-beam"
+            type="default"
+            stream={micStream}
+            processing={isLoading || transcribing}
+            colorVariant="ocean"
+            theme={voiceTheme}
+            active={Boolean(micStream) || isLoading || transcribing}
+            strength={0.9}
+          >
+            <div className="chat-input-container">
           {attachedFiles.length > 0 && (
             <div className="chat-attachments" aria-label="Attachments">
               {attachedFiles.map((fileData, idx) => (
@@ -1627,10 +1780,37 @@ const ChatView = () => {
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
+            {speechSupported && micEnabled ? (
+              <button
+                type="button"
+                className={`chat-mic-button${listening || transcribing ? ' is-listening' : ''}`}
+                onClick={handleMicClick}
+                disabled={isLoading || transcribing}
+                aria-label={
+                  transcribing ? 'Transcribing' : listening ? 'Stop dictation' : 'Start dictation'
+                }
+                title={
+                  transcribing
+                    ? 'Transcribing…'
+                    : listening
+                      ? 'Stop and transcribe'
+                      : 'Click to speak, click again to transcribe'
+                }
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+              </button>
+            ) : null}
             <input
               type="text"
               className="chat-input-field"
-              placeholder="Message PROXY…"
+              placeholder={
+                transcribing ? 'Transcribing…' : listening ? 'Listening… text updates as you speak' : 'Message PROXY…'
+              }
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               disabled={isLoading}
@@ -1660,6 +1840,13 @@ const ChatView = () => {
               </svg>
             </button>
           </div>
+            </div>
+          </VoiceBeam>
+          {speechNotice ? (
+            <p className="chat-speech-notice" role="status">
+              {speechNotice}
+            </p>
+          ) : null}
         </form>
       </div>
     </AppShell>

@@ -150,14 +150,20 @@ export async function upsertOfficialDefaultStates(
     const description = value.description || name;
     const state = normalizeState(value);
     const tags = normalizeTags(DEFAULT_STATE_TAGS[name]);
+    const nextInstruction = instructionOf(state);
 
     if (existing) {
       const prev = normalizeState(existing.state);
-      const sameInstruction =
-        instructionOf(prev) === instructionOf(state) &&
-        (prev.description || existing.description || '') === (state.description || description);
+      const sameInstruction = instructionOf(prev) === nextInstruction;
+      const sameDescription =
+        (prev.description || existing.description || '') ===
+        (state.description || description);
+      const sameTags =
+        JSON.stringify(normalizeTags(existing.tags)) === JSON.stringify(tags);
       if (
         sameInstruction &&
+        sameDescription &&
+        sameTags &&
         existing.name === name &&
         existing.isOfficial &&
         existing.officialKey === name
@@ -196,6 +202,30 @@ export async function upsertOfficialDefaultStates(
       });
     }
     upserted += 1;
+  }
+
+  // Private legacy Simplify clones that still force the old prefix → point libraries
+  // at the official doc (reconcile) and drop the stale private body on next sync.
+  // Also rewrite any remaining private replaceable clones in place so gallery/edit
+  // views stop showing the dumbed-down line immediately.
+  const simplifyOfficial = await ctx.db
+    .query('states')
+    .withIndex('by_official_key', (q: any) => q.eq('officialKey', 'Simplify'))
+    .first();
+  if (simplifyOfficial) {
+    const clean = normalizeState(DEFAULT_STATES.Simplify);
+    const all = await ctx.db.query('states').collect();
+    for (const doc of all) {
+      if (doc.isOfficial || doc.officialKey) continue;
+      if (doc.name.trim().toLowerCase() !== 'simplify') continue;
+      if (!isReplaceableDefaultClone(doc.name, doc.state)) continue;
+      await ctx.db.patch(doc._id, {
+        description: DEFAULT_STATES.Simplify.description || doc.description,
+        state: clean,
+        updatedAt: now,
+      });
+      upserted += 1;
+    }
   }
 
   return upserted;
@@ -1033,6 +1063,7 @@ export const removeMyState = mutation({
     library: v.array(libraryItemValidator),
     activeCount: v.number(),
     activeLimit: v.union(v.number(), v.null()),
+    updatedAt: v.optional(v.number()),
   }),
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -1104,6 +1135,7 @@ export const setStateActive = mutation({
     activeCount: v.number(),
     activeLimit: v.union(v.number(), v.null()),
     isActive: v.boolean(),
+    updatedAt: v.optional(v.number()),
   }),
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -1117,13 +1149,31 @@ export const setStateActive = mutation({
     const doc = await ctx.db.get(args.stateId);
     if (!doc) throw new Error('State not found');
 
-    const row = await ctx.db
+    let row = await ctx.db
       .query('userStates')
       .withIndex('by_user_state', (q) =>
         q.eq('workosId', workosId).eq('stateId', args.stateId),
       )
       .first();
-    if (!row) throw new Error('State is not in your library');
+
+    // Official (and other public) States are shown as activatable on the
+    // gallery even before a membership row exists, create one on demand.
+    if (!row) {
+      const canJoin =
+        Boolean(doc.isOfficial) ||
+        Boolean(doc.officialKey) ||
+        resolveVisibility(doc) === 'public' ||
+        doc.authorWorkosId === workosId;
+      if (!canJoin) throw new Error('State is not in your library');
+      await addLibraryMembership(ctx, workosId, args.stateId);
+      row = await ctx.db
+        .query('userStates')
+        .withIndex('by_user_state', (q) =>
+          q.eq('workosId', workosId).eq('stateId', args.stateId),
+        )
+        .first();
+      if (!row) throw new Error('Could not add State to your library');
+    }
 
     if (args.active) {
       if (row.isActive === true) {

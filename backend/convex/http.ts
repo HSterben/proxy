@@ -9,6 +9,7 @@ import {
   weightedTokensFromUsage,
   type ChatMessage,
 } from './ai/provider';
+import { transcribeAudioBase64, whisperDiagnostics } from './ai/transcribe';
 
 const http = httpRouter();
 
@@ -1154,6 +1155,89 @@ http.route({ path: '/openrouter/complete', method: 'OPTIONS', handler: httpActio
 http.route({ path: '/openrouter/complete', method: 'POST', handler: completeHandler });
 http.route({ path: '/ai/complete', method: 'OPTIONS', handler: httpAction(async () => corsOptions()) });
 http.route({ path: '/ai/complete', method: 'POST', handler: completeHandler });
+
+/** Whisper speech-to-text (MediaRecorder → base64 JSON). */
+const transcribeHandler = httpAction(async (ctx, req) => {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) {
+    return corsJson({ error: 'Authentication required' }, 401);
+  }
+
+  try {
+    const body = (await req.json()) as {
+      audioBase64?: string;
+      mimeType?: string;
+      language?: string;
+    };
+    const audioBase64 = String(body.audioBase64 || '').trim();
+    if (!audioBase64) {
+      return corsJson({ error: 'audioBase64 is required' }, 400);
+    }
+
+    // Cap ~4MB decoded to keep requests reasonable.
+    const approxBytes = Math.floor((audioBase64.length * 3) / 4);
+    if (approxBytes > 4 * 1024 * 1024) {
+      return corsJson({ error: 'Audio clip is too long. Keep dictation under about a minute.' }, 413);
+    }
+
+    const result = await transcribeAudioBase64({
+      audioBase64,
+      mimeType: body.mimeType,
+      language: body.language,
+    });
+    return corsJson({ text: result.text, model: result.model });
+  } catch (error) {
+    console.error('AI transcribe error:', error);
+    return corsJson(
+      { error: error instanceof Error ? error.message : 'Transcription failed' },
+      502,
+    );
+  }
+});
+
+http.route({ path: '/openrouter/transcribe', method: 'OPTIONS', handler: httpAction(async () => corsOptions()) });
+http.route({ path: '/openrouter/transcribe', method: 'POST', handler: transcribeHandler });
+http.route({ path: '/ai/transcribe', method: 'OPTIONS', handler: httpAction(async () => corsOptions()) });
+http.route({ path: '/ai/transcribe', method: 'POST', handler: transcribeHandler });
+
+http.route({
+  path: '/openrouter/transcribe/status',
+  method: 'OPTIONS',
+  handler: httpAction(async () => corsOptions()),
+});
+http.route({
+  path: '/openrouter/transcribe/status',
+  method: 'GET',
+  handler: httpAction(async () => {
+    const status = whisperDiagnostics();
+    return corsJson({
+      ok: status.configured,
+      provider: status.provider,
+      hint: status.configured
+        ? 'Speech-to-text is configured.'
+        : 'Set GROQ_API_KEY (free) or OPENAI_API_KEY in Convex env.',
+    });
+  }),
+});
+http.route({
+  path: '/ai/transcribe/status',
+  method: 'OPTIONS',
+  handler: httpAction(async () => corsOptions()),
+});
+http.route({
+  path: '/ai/transcribe/status',
+  method: 'GET',
+  handler: httpAction(async () => {
+    const status = whisperDiagnostics();
+    return corsJson({
+      ok: status.configured,
+      provider: status.provider,
+      hint: status.configured
+        ? 'Speech-to-text is configured.'
+        : 'Set GROQ_API_KEY (free) or OPENAI_API_KEY in Convex env.',
+    });
+  }),
+});
 
 // Public subscription page (browser)
 http.route({

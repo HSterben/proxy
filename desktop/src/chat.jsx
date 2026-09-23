@@ -1,9 +1,11 @@
 import { createRoot } from 'react-dom/client';
-import { initTheme } from './hooks/useTheme';
+import { ThemeBridge } from './hooks/useTheme';
 import ChatView from './views/ChatView';
-
-initTheme();
 
 const container = document.getElementById('root');
 const root = createRoot(container);
-root.render(<ChatView />);
+root.render(
+  <ThemeBridge>
+    <ChatView />
+  </ThemeBridge>,
+);

@@ -259,7 +259,8 @@ export default function PresetsView() {
   const [canPublishStates, setCanPublishStates] = useState(true);
   const [activeCount, setActiveCount] = useState(0);
   const [activeLimit, setActiveLimit] = useState(null);
-  const [togglingId, setTogglingId] = useState(null);
+  const [listQuery, setListQuery] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
 
   const showMessage = useCallback((text, isError = false) => {
     setMessage({ text, isError });
@@ -532,53 +533,20 @@ export default function PresetsView() {
   const addEntry = () => {
     if (!canCreateStates) {
       showMessage(
-        "Free accounts cannot create custom States. Activate up to 3 official States, or subscribe / get beta access.",
+        "Free accounts cannot create custom States. Activate up to 3 official States on the website, or subscribe / get beta access.",
         true,
       );
       return;
     }
     const names = entries.map((e) => e.name);
-    setEntries((prev) => [...prev, { ...emptyEntry(), name: uniqueNewName(names) }]);
-  };
-
-  const toggleActive = async (entry) => {
-    if (!entry?.stateId) {
-      showMessage("Save this State to your account before activating it.", true);
-      return;
-    }
-    setTogglingId(entry.stateId);
-    try {
-      const token = await api.getAuthToken?.();
-      if (!token) {
-        showMessage("Sign in to change active States.", true);
-        return;
-      }
-      convex.current.setAuth(async () => (await api.getAuthToken?.()) ?? token);
-      const result = await convex.current.mutation(convexApi.states.setStateActive, {
-        stateId: entry.stateId,
-        active: !entry.isActive,
-      });
-      setActiveCount(Number(result.activeCount ?? 0));
-      setActiveLimit(result.activeLimit === undefined ? activeLimit : result.activeLimit);
-      const libraryMeta = result.library || [];
-      const presets = {};
-      for (const item of libraryMeta) {
-        if (item?.name && item.state) presets[item.name] = item.state;
-      }
-      setEntries((prev) => presetsToEntries(presets, prev, libraryMeta));
-      const activePresets = {};
-      for (const item of libraryMeta) {
-        if (item?.isActive && item.name && item.state) {
-          activePresets[item.name] = item.state;
-        }
-      }
-      await api.writePresets?.(activePresets, { broadcast: true });
-      fingerprintRef.current = contentFingerprint(activePresets);
-    } catch (err) {
-      showMessage(userFacingError(err, "Could not update active States."), true);
-    } finally {
-      setTogglingId(null);
-    }
+    const next = { ...emptyEntry(), name: uniqueNewName(names) };
+    setEntries((prev) => [...prev, next]);
+    setExpandedId(next.id);
+    setListQuery("");
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`preset-row-${next.id}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
   };
 
   const validateBeforeSave = () => {
@@ -677,6 +645,20 @@ export default function PresetsView() {
     showMessage("Discarded unsaved edits.");
   };
 
+  const q = listQuery.trim().toLowerCase();
+  const visibleEntries = q
+    ? entries
+        .map((entry, index) => ({ entry, index }))
+        .filter(({ entry }) => {
+          const hay = `${entry.name} ${entry.description}`.toLowerCase();
+          return hay.includes(q);
+        })
+    : entries.map((entry, index) => ({ entry, index }));
+
+  const toggleExpanded = (id) => {
+    setExpandedId((cur) => (cur === id ? null : id));
+  };
+
   if (!api) {
     return (
       <div className="settings-view">
@@ -700,15 +682,18 @@ export default function PresetsView() {
               <h2>Your states</h2>
               <p className="settings-hint">
                 {dirty ? "Unsaved edits · " : ""}
-                In chat, put the trigger word first, for example <code>Simplify hello</code>.
+                Select a State to edit. In chat, put the trigger word first, for example{" "}
+                <code>Simplify hello</code>.
                 {activeLimit == null
                   ? ` ${activeCount} active (unlimited).`
                   : ` ${activeCount} / ${activeLimit} active.`}
+                {" "}
+                Turn States on or off for chat on the website.
                 {canCreateStates
                   ? canPublishStates
                     ? " New states stay private until you turn on Make public."
                     : " You can create private custom States (publishing requires a paid plan)."
-                  : " Free accounts can activate any 3 official States but cannot create custom ones."}
+                  : " Free accounts can activate any 3 official States on the website but cannot create custom ones."}
               </p>
             </div>
           </div>
@@ -768,195 +753,285 @@ export default function PresetsView() {
         ) : entries.length === 0 ? (
           <p className="settings-hint">No states yet. Add a state to create a chat trigger word.</p>
         ) : (
-          entries.map((entry, index) => (
-            <section key={entry.id} className="preset-card">
-              <div className="preset-card-head">
-                <input
-                  type="text"
-                  className="preset-input preset-name-input"
-                  value={entry.name}
-                  onChange={(e) => updateEntry(index, { name: e.target.value })}
-                  placeholder="Trigger word"
-                  spellCheck={false}
-                  aria-label="Trigger word"
-                />
-                <button
-                  type="button"
-                  className="btn-secondary btn-sm"
-                  disabled={
-                    !entry.stateId ||
-                    togglingId === entry.stateId ||
-                    (!entry.isActive &&
-                      activeLimit != null &&
-                      activeCount >= activeLimit)
-                  }
-                  title={
-                    !entry.stateId
-                      ? "Save to your account first"
-                      : !entry.isActive &&
-                          activeLimit != null &&
-                          activeCount >= activeLimit
-                        ? activeLimit === 5
-                          ? "Beta accounts can have up to 5 active States."
-                          : "Free accounts can have up to 3 active States."
-                        : entry.isActive
-                          ? "Deactivate for chat"
-                          : "Activate for chat"
-                  }
-                  onClick={() => void toggleActive(entry)}
-                >
-                  {togglingId === entry.stateId
-                    ? "…"
-                    : entry.isActive
-                      ? "Active"
-                      : "Inactive"}
-                </button>
-                {!entry.isOfficial && (
-                  <button
-                    type="button"
-                    className="btn-danger btn-sm preset-remove"
-                    onClick={() => removeEntry(index)}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-
+          <>
+            <div className="presets-list-toolbar">
               <input
-                type="text"
-                className="preset-input"
-                value={entry.description}
-                onChange={(e) => updateEntry(index, { description: e.target.value })}
-                placeholder="Short description shown in chat"
-                aria-label="Description"
+                className="preset-input presets-search"
+                type="search"
+                value={listQuery}
+                onChange={(e) => setListQuery(e.target.value)}
+                placeholder="Search states"
+                aria-label="Search states"
               />
+              <span className="presets-list-count">
+                {visibleEntries.length}
+                {q ? ` match` : ""} · {entries.length} total
+              </span>
+            </div>
 
-              <textarea
-                className="preset-textarea"
-                value={entry.systemInstruction}
-                onChange={(e) => updateEntry(index, { systemInstruction: e.target.value })}
-                placeholder="How PROXY should behave for this trigger"
-                rows={4}
-                spellCheck={false}
-                aria-label="Instructions"
-              />
-
-              {canEditVisibility(entry) && canPublishStates ? (
-                <label className="preset-visibility">
-                  <input
-                    type="checkbox"
-                    checked={entry.visibility === "public"}
-                    onChange={(e) =>
-                      updateEntry(index, {
-                        visibility: e.target.checked ? "public" : "private",
-                      })
-                    }
-                  />
-                  <span>
-                    <span className="preset-visibility-title">Make public</span>
-                    <span className="preset-visibility-hint">
-                      Lists this state in the website gallery. Leave off to keep it private.
-                    </span>
-                  </span>
-                </label>
+            <div className="presets-list" role="list">
+              {visibleEntries.length === 0 ? (
+                <p className="settings-hint presets-list-empty">No states match that search.</p>
               ) : (
-                <div className="preset-visibility preset-visibility-readonly">
-                  <span>
-                    <span className="preset-visibility-title">
-                      {entry.isOfficial
-                        ? "Official PROXY state"
-                        : !canPublishStates
-                          ? "Publishing requires a subscription"
-                        : entry.visibility === "public"
-                          ? "Public (from gallery)"
-                          : "Private"}
-                    </span>
-                    <span className="preset-visibility-hint">
-                      {entry.isOfficial
-                        ? "Built-in PROXY states stay public. You can’t change visibility."
-                        : !canPublishStates
-                          ? "Activate official States within your slot limit. Subscribe to publish custom States to the gallery."
-                        : "Only the owner can change public or private for this state."}
-                    </span>
-                  </span>
-                </div>
-              )}
+                visibleEntries.map(({ entry, index }) => {
+                  const isOpen = expandedId === entry.id;
+                  return (
+                    <section
+                      key={entry.id}
+                      id={`preset-row-${entry.id}`}
+                      className={`preset-row${isOpen ? " is-open" : ""}${
+                        entry.isActive ? " is-active-slot" : ""
+                      }`}
+                      role="listitem"
+                    >
+                      <div className="preset-row-summary">
+                        <button
+                          type="button"
+                          className="preset-row-toggle"
+                          aria-expanded={isOpen}
+                          aria-controls={`preset-editor-${entry.id}`}
+                          onClick={() => {
+                            toggleExpanded(entry.id);
+                            if (!isOpen) {
+                              requestAnimationFrame(() => {
+                                document
+                                  .getElementById(`preset-row-${entry.id}`)
+                                  ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                              });
+                            }
+                          }}
+                        >
+                          <span className="preset-row-chevron" aria-hidden />
+                          <span className="preset-row-copy">
+                            <span className="preset-row-name">
+                              {entry.name.trim() || "Untitled"}
+                            </span>
+                            <span className="preset-row-desc">
+                              {entry.description.trim() ||
+                                (entry.isOfficial
+                                  ? "Official PROXY state"
+                                  : "No description yet")}
+                            </span>
+                          </span>
+                          <span className="preset-row-badges">
+                            {entry.isOfficial ? (
+                              <span className="preset-badge">Official</span>
+                            ) : null}
+                            {entry.isActive ? (
+                              <span className="preset-badge preset-badge-on">Active</span>
+                            ) : null}
+                          </span>
+                        </button>
+                      </div>
 
-              <details className="preset-advanced">
-                <summary>Advanced</summary>
-                <div className="preset-number-grid">
-                  <label className="preset-field preset-field-compact">
-                    <span className="preset-label">Temperature</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="preset-input"
-                      value={entry.temperature}
-                      onChange={(e) => updateEntry(index, { temperature: e.target.value })}
-                      placeholder="0.7"
-                    />
-                  </label>
-                  <label className="preset-field preset-field-compact">
-                    <span className="preset-label">Max tokens (output, 2K to 4K)</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      className="preset-input"
-                      value={entry.maxTokens}
-                      onChange={(e) => updateEntry(index, { maxTokens: e.target.value })}
-                      placeholder="4096"
-                    />
-                  </label>
-                  <label className="preset-field preset-field-compact">
-                    <span className="preset-label">Top P</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="preset-input"
-                      value={entry.topP}
-                      onChange={(e) => updateEntry(index, { topP: e.target.value })}
-                      placeholder="0.95"
-                    />
-                  </label>
-                  <label className="preset-field preset-field-compact">
-                    <span className="preset-label">Frequency penalty</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="preset-input"
-                      value={entry.frequencyPenalty}
-                      onChange={(e) => updateEntry(index, { frequencyPenalty: e.target.value })}
-                      placeholder="0"
-                    />
-                  </label>
-                  <label className="preset-field preset-field-compact">
-                    <span className="preset-label">Presence penalty</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="preset-input"
-                      value={entry.presencePenalty}
-                      onChange={(e) => updateEntry(index, { presencePenalty: e.target.value })}
-                      placeholder="0.3"
-                    />
-                  </label>
-                </div>
-                <textarea
-                  className="preset-textarea preset-textarea-sm"
-                  value={entry.stopLines}
-                  onChange={(e) => updateEntry(index, { stopLines: e.target.value })}
-                  placeholder="Stop sequences, one per line (optional)"
-                  rows={2}
-                  spellCheck={false}
-                  aria-label="Stop sequences"
-                />
-              </details>
-            </section>
-          ))
+                      <div
+                        className="preset-row-collapse"
+                        id={`preset-editor-${entry.id}`}
+                      >
+                        <div className="preset-row-editor">
+                          <div className="preset-editor-head">
+                            <input
+                              type="text"
+                              className="preset-input preset-name-input"
+                              value={entry.name}
+                              onChange={(e) =>
+                                updateEntry(index, { name: e.target.value })
+                              }
+                              placeholder="Trigger word"
+                              spellCheck={false}
+                              aria-label="Trigger word"
+                            />
+                            {!entry.isOfficial && (
+                              <button
+                                type="button"
+                                className="btn-danger btn-sm preset-remove"
+                                onClick={() => {
+                                  removeEntry(index);
+                                  setExpandedId(null);
+                                }}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+
+                          <input
+                            type="text"
+                            className="preset-input"
+                            value={entry.description}
+                            onChange={(e) =>
+                              updateEntry(index, { description: e.target.value })
+                            }
+                            placeholder="Short description shown in chat"
+                            aria-label="Description"
+                          />
+
+                          <textarea
+                            className="preset-textarea"
+                            value={entry.systemInstruction}
+                            onChange={(e) =>
+                              updateEntry(index, {
+                                systemInstruction: e.target.value,
+                              })
+                            }
+                            placeholder="How PROXY should behave for this trigger"
+                            rows={4}
+                            spellCheck={false}
+                            aria-label="Instructions"
+                          />
+
+                          {canEditVisibility(entry) && canPublishStates ? (
+                            <label className="preset-visibility">
+                              <input
+                                type="checkbox"
+                                checked={entry.visibility === "public"}
+                                onChange={(e) =>
+                                  updateEntry(index, {
+                                    visibility: e.target.checked
+                                      ? "public"
+                                      : "private",
+                                  })
+                                }
+                              />
+                              <span>
+                                <span className="preset-visibility-title">
+                                  Make public
+                                </span>
+                                <span className="preset-visibility-hint">
+                                  Lists this state in the website gallery. Leave off
+                                  to keep it private.
+                                </span>
+                              </span>
+                            </label>
+                          ) : (
+                            <div className="preset-visibility preset-visibility-readonly">
+                              <span>
+                                <span className="preset-visibility-title">
+                                  {entry.isOfficial
+                                    ? "Official PROXY state"
+                                    : !canPublishStates
+                                      ? "Publishing requires a subscription"
+                                      : entry.visibility === "public"
+                                        ? "Public (from gallery)"
+                                        : "Private"}
+                                </span>
+                                <span className="preset-visibility-hint">
+                                  {entry.isOfficial
+                                    ? "Built-in PROXY states stay public. You can’t change visibility."
+                                    : !canPublishStates
+                                      ? "Activate States for chat on the website. Subscribe to publish custom States to the gallery."
+                                      : "Only the owner can change public or private for this state."}
+                                </span>
+                              </span>
+                            </div>
+                          )}
+
+                          <details className="preset-advanced">
+                            <summary>Advanced</summary>
+                            <div className="preset-number-grid">
+                              <label className="preset-field preset-field-compact">
+                                <span className="preset-label">Temperature</span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="preset-input"
+                                  value={entry.temperature}
+                                  onChange={(e) =>
+                                    updateEntry(index, {
+                                      temperature: e.target.value,
+                                    })
+                                  }
+                                  placeholder="0.7"
+                                />
+                              </label>
+                              <label className="preset-field preset-field-compact">
+                                <span className="preset-label">
+                                  Max tokens (output, 2K to 4K)
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  className="preset-input"
+                                  value={entry.maxTokens}
+                                  onChange={(e) =>
+                                    updateEntry(index, { maxTokens: e.target.value })
+                                  }
+                                  placeholder="4096"
+                                />
+                              </label>
+                              <label className="preset-field preset-field-compact">
+                                <span className="preset-label">Top P</span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="preset-input"
+                                  value={entry.topP}
+                                  onChange={(e) =>
+                                    updateEntry(index, { topP: e.target.value })
+                                  }
+                                  placeholder="0.95"
+                                />
+                              </label>
+                              <label className="preset-field preset-field-compact">
+                                <span className="preset-label">
+                                  Frequency penalty
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="preset-input"
+                                  value={entry.frequencyPenalty}
+                                  onChange={(e) =>
+                                    updateEntry(index, {
+                                      frequencyPenalty: e.target.value,
+                                    })
+                                  }
+                                  placeholder="0"
+                                />
+                              </label>
+                              <label className="preset-field preset-field-compact">
+                                <span className="preset-label">
+                                  Presence penalty
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="preset-input"
+                                  value={entry.presencePenalty}
+                                  onChange={(e) =>
+                                    updateEntry(index, {
+                                      presencePenalty: e.target.value,
+                                    })
+                                  }
+                                  placeholder="0.3"
+                                />
+                              </label>
+                            </div>
+                            <textarea
+                              className="preset-textarea preset-textarea-sm"
+                              value={entry.stopLines}
+                              onChange={(e) =>
+                                updateEntry(index, { stopLines: e.target.value })
+                              }
+                              placeholder="Stop sequences, one per line (optional)"
+                              rows={2}
+                              spellCheck={false}
+                              aria-label="Stop sequences"
+                            />
+                          </details>
+                        </div>
+                      </div>
+                    </section>
+                  );
+                })
+              )}
+            </div>
+          </>
         )}
       </div>
 
       {!loading && (
+
         <div className="presets-footer">
           <button
             type="button"

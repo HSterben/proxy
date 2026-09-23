@@ -2,6 +2,14 @@ import { useState, useEffect, useRef } from "react";
 import TitleBar from "../components/TitleBar";
 import { useTheme } from "../hooks/useTheme";
 import { userFacingError } from "../lib/userFacingError";
+import { convexSiteUrl } from "../lib/convexUrls";
+import {
+  isSpeechToTextSupported,
+  listMicrophones,
+  requestMicrophoneAccess,
+  getStoredMicDeviceId,
+  setStoredMicDeviceId,
+} from "../lib/speechToText";
 import "./SettingsView.css";
 
 const api = typeof window !== "undefined" ? window.electronAPI : null;
@@ -69,6 +77,7 @@ const POSITION_LABELS = [
 const NAV = [
   { id: "general", label: "General" },
   { id: "appearance", label: "Appearance" },
+  { id: "audio", label: "Audio" },
   { id: "shortcuts", label: "Shortcuts" },
   { id: "notifications", label: "Notifications" },
   { id: "privacy", label: "Privacy" },
@@ -94,7 +103,8 @@ export default function SettingsView() {
   const { preference, setTheme } = useTheme();
   const [section, setSection] = useState("general");
   const [keybind, setKeybind] = useState("");
-  const [keybindEditing, setKeybindEditing] = useState(false);
+  const [voiceKeybind, setVoiceKeybind] = useState("");
+  const [keybindEditing, setKeybindEditing] = useState(null); // null | 'show' | 'voice'
   const [windowSize, setWindowSize] = useState("Regular");
   const [windowPosition, setWindowPosition] = useState("bottom-right");
   const [presetsPath, setPresetsPath] = useState("");
@@ -106,22 +116,35 @@ export default function SettingsView() {
   const [signedIn, setSignedIn] = useState(null);
   const [signingIn, setSigningIn] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [micDeviceId, setMicDeviceId] = useState("");
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [microphones, setMicrophones] = useState([]);
+  const [micPermission, setMicPermission] = useState("unknown");
+  const [micBusy, setMicBusy] = useState(false);
+  const [speechStatus, setSpeechStatus] = useState(null);
   const keybindInputRef = useRef(null);
+  const voiceKeybindInputRef = useRef(null);
 
   const loadSettings = async () => {
     if (!api) return;
     try {
-      const [kb, size, pos, path, startup, token, version, typedOverrides] = await Promise.all([
-        api.getKeybind(),
-        api.getWindowSize(),
-        api.getWindowPosition(),
-        api.getPresetsPath(),
-        api.getRunOnStartup?.() ?? Promise.resolve(false),
-        api.getAuthToken?.() ?? Promise.resolve(null),
-        api.getAppVersion?.() ?? Promise.resolve(""),
-        api.getTypedStateOverrides?.() ?? Promise.resolve(true),
-      ]);
+      const [kb, voiceKb, size, pos, path, startup, token, version, typedOverrides, notifications, micId, micOn] =
+        await Promise.all([
+          api.getKeybind(),
+          api.getVoiceKeybind?.() ?? Promise.resolve(""),
+          api.getWindowSize(),
+          api.getWindowPosition(),
+          api.getPresetsPath(),
+          api.getRunOnStartup?.() ?? Promise.resolve(false),
+          api.getAuthToken?.() ?? Promise.resolve(null),
+          api.getAppVersion?.() ?? Promise.resolve(""),
+          api.getTypedStateOverrides?.() ?? Promise.resolve(true),
+          api.getNotificationsEnabled?.() ?? Promise.resolve(true),
+          api.getMicDeviceId?.() ?? Promise.resolve(""),
+          api.getMicEnabled?.() ?? Promise.resolve(true),
+        ]);
       setKeybind(kb || "");
+      setVoiceKeybind(voiceKb || "");
       setWindowSize(size || "Regular");
       setWindowPosition(pos || "bottom-right");
       setPresetsPath(path || "");
@@ -129,6 +152,11 @@ export default function SettingsView() {
       setSignedIn(Boolean(token));
       setAppVersion(version || "");
       setTypedStateOverrides(typedOverrides !== false);
+      setNotificationsEnabled(notifications !== false);
+      setMicEnabled(micOn !== false);
+      setMicDeviceId(
+        (typeof micId === "string" && micId) || getStoredMicDeviceId() || "",
+      );
     } catch (e) {
       console.error(e);
     }
@@ -142,20 +170,31 @@ export default function SettingsView() {
     if (!keybindEditing) return;
     const onKeyDown = (e) => {
       const accel = buildAccelerator(e);
-      if (accel) {
-        api?.setKeybind(accel).then((r) => {
-          if (r?.success) setKeybind(accel);
-          setKeybindEditing(false);
-        });
-      }
+      if (!accel) return;
+      const save =
+        keybindEditing === "voice"
+          ? api?.setVoiceKeybind?.(accel)
+          : api?.setKeybind(accel);
+      Promise.resolve(save).then((r) => {
+        if (r?.success) {
+          if (keybindEditing === "voice") setVoiceKeybind(accel);
+          else setKeybind(accel);
+        } else if (r?.error) {
+          showMessage(r.error, true);
+        }
+        setKeybindEditing(null);
+      });
     };
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [keybindEditing]);
 
-  const handleKeybindClick = () => {
-    setKeybindEditing(true);
-    setTimeout(() => keybindInputRef.current?.focus(), 0);
+  const handleKeybindClick = (which = "show") => {
+    setKeybindEditing(which);
+    setTimeout(() => {
+      if (which === "voice") voiceKeybindInputRef.current?.focus();
+      else keybindInputRef.current?.focus();
+    }, 0);
   };
 
   const handleSizeChange = (e) => {
@@ -178,7 +217,7 @@ export default function SettingsView() {
     const unsubSuccess = api?.onAuthSuccess?.(() => {
       setSignedIn(true);
       setSigningIn(false);
-      setMessage({ text: "Signed in.", isError: false });
+      setMessage({ text: "Signed in to PROXY.", isError: false });
       setTimeout(() => setMessage(null), 3000);
     });
     const unsubLogout = api?.onAuthLogout?.(() => {
@@ -187,7 +226,7 @@ export default function SettingsView() {
     });
     const unsubError = api?.onAuthError?.(() => {
       setSigningIn(false);
-      setMessage({ text: "Sign-in didn’t finish. Try again.", isError: true });
+      setMessage({ text: "Sign-in didn’t finish. Try again from Settings.", isError: true });
       setTimeout(() => setMessage(null), 3000);
     });
     return () => {
@@ -199,7 +238,7 @@ export default function SettingsView() {
 
   const handleSignIn = async () => {
     setSigningIn(true);
-    showMessage("Finish signing in in your browser…");
+    showMessage("Complete sign-in in your browser…");
     try {
       await api?.openLogin?.();
     } catch (e) {
@@ -212,7 +251,7 @@ export default function SettingsView() {
     try {
       await api?.logout?.();
       setSignedIn(false);
-      showMessage("Signed out of PROXY.");
+      showMessage("Signed out.");
     } catch (e) {
       showMessage(userFacingError(e, "Couldn’t sign out"), true);
     }
@@ -221,14 +260,14 @@ export default function SettingsView() {
   const handleExport = async () => {
     const result = await api?.exportPresets();
     if (result?.canceled) return;
-    if (result?.success) showMessage("States file exported.");
+    if (result?.success) showMessage("States exported.");
     else showMessage(result?.error || "Export failed", true);
   };
 
   const handleImport = async () => {
     const result = await api?.importPresets();
     if (result?.canceled) return;
-    if (result?.success) showMessage("States file imported.");
+    if (result?.success) showMessage("States imported.");
     else showMessage(result?.error || "Import failed", true);
   };
 
@@ -237,16 +276,100 @@ export default function SettingsView() {
     if (result?.success) {
       const path = await api?.getBundledPresetsPath();
       setPresetsPath(path || "Built-in states file");
-      showMessage("Switched back to the built-in states file.");
-    } else showMessage("Couldn’t reset the states file.", true);
+      showMessage("Using the built-in states file again.");
+    } else showMessage("Couldn’t switch back to the built-in states file.", true);
   };
 
   const handleRunOnStartupChange = (e) => {
     const enabled = e.target.checked;
     setRunOnStartup(enabled);
     api?.setRunOnStartup?.(enabled).then((result) => {
-      if (result && !result.success) showMessage(result.error || "Couldn’t update startup setting", true);
+      if (result && !result.success) showMessage(result.error || "Couldn’t change the startup setting", true);
     });
+  };
+
+  const handleNotificationsChange = (e) => {
+    const enabled = e.target.checked;
+    setNotificationsEnabled(enabled);
+    api?.setNotificationsEnabled?.(enabled).then((result) => {
+      if (result && !result.success) {
+        showMessage(result.error || "Couldn’t change notifications", true);
+      }
+    });
+  };
+
+  const refreshMicrophones = async ({ requestAccess = false, preferredId = micDeviceId } = {}) => {
+    setMicBusy(true);
+    try {
+      if (requestAccess) {
+        await requestMicrophoneAccess(preferredId);
+        setMicPermission("granted");
+      }
+      const list = await listMicrophones();
+      setMicrophones(list);
+      if (list.some((m) => m.label && !m.label.startsWith("Microphone "))) {
+        setMicPermission("granted");
+      }
+      return list;
+    } catch (err) {
+      setMicPermission("denied");
+      setMicrophones([]);
+      throw err;
+    } finally {
+      setMicBusy(false);
+    }
+  };
+
+  const checkSpeechBackend = async () => {
+    try {
+      const res = await fetch(`${convexSiteUrl}/openrouter/transcribe/status`);
+      const data = await res.json().catch(() => ({}));
+      const next = {
+        ok: Boolean(data.ok),
+        provider: data.provider || "none",
+        hint: data.hint || (res.ok ? "Status unknown." : `Couldn’t check speech status (HTTP ${res.status})`),
+      };
+      setSpeechStatus(next);
+      return next;
+    } catch (err) {
+      const next = {
+        ok: false,
+        provider: "none",
+        hint: userFacingError(err, "Couldn’t reach PROXY’s speech status"),
+      };
+      setSpeechStatus(next);
+      return next;
+    }
+  };
+
+  useEffect(() => {
+    if (section !== "audio" || !micEnabled) return;
+    void (async () => {
+      try {
+        await refreshMicrophones({ requestAccess: true });
+      } catch (err) {
+        showMessage(userFacingError(err, "Allow the microphone when Windows asks"), true);
+      }
+      await checkSpeechBackend();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, micEnabled]);
+
+  const handleMicDeviceChange = async (e) => {
+    const next = e.target.value;
+    setMicDeviceId(next);
+    setStoredMicDeviceId(next);
+    try {
+      await refreshMicrophones({ requestAccess: true, preferredId: next });
+      showMessage(next ? "Microphone saved." : "Using the Windows default microphone.");
+    } catch (err) {
+      showMessage(userFacingError(err, "Couldn’t use that microphone"), true);
+    }
+    try {
+      if (api?.setMicDeviceId) await api.setMicDeviceId(next);
+    } catch (err) {
+      console.warn("setMicDeviceId IPC unavailable:", err);
+    }
   };
 
   const handleTypedStateOverridesChange = (e) => {
@@ -254,7 +377,7 @@ export default function SettingsView() {
     setTypedStateOverrides(enabled);
     api?.setTypedStateOverrides?.(enabled).then((result) => {
       if (result && !result.success) {
-        showMessage(result.error || "Couldn’t update state override setting", true);
+        showMessage(result.error || "Couldn’t change the typed-state setting", true);
       }
     });
   };
@@ -264,7 +387,7 @@ export default function SettingsView() {
   if (!api) {
     return (
       <div className="settings-view">
-        <p>Open Settings from the PROXY desktop app.</p>
+        <p>Open Settings from the PROXY tray menu.</p>
       </div>
     );
   }
@@ -295,21 +418,23 @@ export default function SettingsView() {
             <>
               <h2>General</h2>
               <ToggleRow
-                label="Open PROXY at Windows sign-in"
-                hint="Starts PROXY in the background when you log into Windows"
+                label="Launch PROXY when Windows starts"
+                hint="PROXY opens in the tray after you sign in to Windows"
                 checked={runOnStartup}
                 onChange={handleRunOnStartupChange}
               />
               <ToggleRow
-                label="Typed state overrides dropdown"
-                hint="If you type a state word first (e.g. Summarize), use that instead of the selected dropdown state"
+                label="Typed state wins over dropdown"
+                hint="If your message starts with a state name like Simplify, that state is used instead of the one selected in the bubble"
                 checked={typedStateOverrides}
                 onChange={handleTypedStateOverridesChange}
               />
               <div className="settings-row">
                 <div>
                   <div className="settings-row-label">States</div>
-                  <div className="settings-row-hint">Create and edit chat trigger words in the States window</div>
+                  <div className="settings-row-hint">
+                    Edit trigger words and instructions in the States window
+                  </div>
                 </div>
                 <button type="button" className="btn-secondary" onClick={() => api?.openPresetsWindow?.()}>
                   Open States
@@ -317,8 +442,8 @@ export default function SettingsView() {
               </div>
               <div className="settings-row">
                 <div>
-                  <div className="settings-row-label">States file path</div>
-                  <div className="settings-row-hint">{presetsPath || "Not set"}</div>
+                  <div className="settings-row-label">States file on this PC</div>
+                  <div className="settings-row-hint">{presetsPath || "Using the built-in file"}</div>
                 </div>
               </div>
               <div className="settings-actions-row">
@@ -335,7 +460,9 @@ export default function SettingsView() {
               <div className="settings-row">
                 <div>
                   <div className="settings-row-label">Theme</div>
-                  <div className="settings-row-hint">Light, dark, or follow Windows</div>
+                  <div className="settings-row-hint">
+                    System follows your Windows light or dark setting
+                  </div>
                 </div>
                 <div className="theme-segment" role="group" aria-label="Theme">
                   {[
@@ -357,25 +484,140 @@ export default function SettingsView() {
             </>
           )}
 
+          {section === "audio" && (
+            <>
+              <h2>Audio</h2>
+              <ToggleRow
+                label="Microphone"
+                hint="Turns speech-to-text off and removes the mic button from the bubble and chat windows"
+                checked={micEnabled}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setMicEnabled(enabled);
+                  api?.setMicEnabled?.(enabled).then((result) => {
+                    if (result && !result.success) {
+                      setMicEnabled(!enabled);
+                      showMessage(result.error || "Couldn’t update the microphone setting", true);
+                    }
+                  });
+                }}
+              />
+              {!micEnabled ? (
+                <p className="settings-hint">
+                  Turn the microphone on to pick an input device and dictate into the bubble or chat.
+                </p>
+              ) : !isSpeechToTextSupported() ? (
+                <p className="settings-hint">
+                  This PC can’t record from a microphone in PROXY.
+                </p>
+              ) : (
+                <>
+                  <div className="settings-row settings-row-stack">
+                    <div>
+                      <div className="settings-row-label">Input device</div>
+                      <div className="settings-row-hint">
+                        {micBusy
+                          ? "Waiting for Windows microphone permission…"
+                          : micPermission === "denied"
+                            ? "Windows blocked the mic. Allow PROXY in the permission prompt, or enable microphone access in Windows Privacy settings."
+                            : micPermission === "granted"
+                              ? "Used by the mic button in the bubble and in chat windows"
+                              : "Choosing a device asks Windows for microphone access so the list can show real names"}
+                      </div>
+                    </div>
+                    <select
+                      className="select-field"
+                      value={micDeviceId}
+                      onChange={(e) => void handleMicDeviceChange(e)}
+                      disabled={micBusy}
+                    >
+                      <option value="">Windows default</option>
+                      {microphones.map((mic) => (
+                        <option key={mic.deviceId} value={mic.deviceId}>
+                          {mic.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="settings-row settings-row-stack">
+                    <div>
+                      <div className="settings-row-label">Transcription service</div>
+                      <div className="settings-row-hint">
+                        {speechStatus == null
+                          ? "Checking…"
+                          : speechStatus.ok
+                            ? `Connected (${speechStatus.provider})`
+                            : speechStatus.hint || "PROXY’s speech endpoint isn’t available right now"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => void checkSpeechBackend()}
+                    >
+                      Check again
+                    </button>
+                  </div>
+                  <p className="settings-hint">
+                    Click the mic once to record, again to turn speech into text. The voice shortcut
+                    opens the bubble with the mic already on; press it again to close.
+                  </p>
+                </>
+              )}
+            </>
+          )}
+
           {section === "shortcuts" && (
             <>
               <h2>Shortcuts</h2>
               <div className="settings-row settings-row-stack">
                 <div>
                   <div className="settings-row-label">Show or hide bubble</div>
-                  <div className="settings-row-hint">Global shortcut while PROXY is running</div>
+                  <div className="settings-row-hint">
+                    Works while PROXY is running, even when the bubble is hidden
+                  </div>
                 </div>
                 <div className="settings-keybind-row">
                   <input
                     ref={keybindInputRef}
                     type="text"
                     className="input-field settings-keybind-input"
-                    value={keybindEditing ? "Press a key combo…" : formatKeybind(keybind)}
+                    value={keybindEditing === "show" ? "Press keys now…" : formatKeybind(keybind)}
                     readOnly
-                    onFocus={handleKeybindClick}
-                    aria-label="Global keybind"
+                    onFocus={() => handleKeybindClick("show")}
+                    aria-label="Show or hide bubble shortcut"
                   />
-                  <button type="button" className="btn-secondary" onClick={handleKeybindClick}>
+                  <button type="button" className="btn-secondary" onClick={() => handleKeybindClick("show")}>
+                    Change shortcut
+                  </button>
+                </div>
+              </div>
+              <div className="settings-row settings-row-stack">
+                <div>
+                  <div className="settings-row-label">Bubble with microphone</div>
+                  <div className="settings-row-hint">
+                    Opens the bubble and starts dictation; press again to close
+                  </div>
+                </div>
+                <div className="settings-keybind-row">
+                  <input
+                    ref={voiceKeybindInputRef}
+                    type="text"
+                    className="input-field settings-keybind-input"
+                    value={
+                      keybindEditing === "voice"
+                        ? "Press keys now…"
+                        : formatKeybind(voiceKeybind)
+                    }
+                    readOnly
+                    onFocus={() => handleKeybindClick("voice")}
+                    aria-label="Voice dictation shortcut"
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => handleKeybindClick("voice")}
+                  >
                     Change shortcut
                   </button>
                 </div>
@@ -383,7 +625,9 @@ export default function SettingsView() {
               <div className="settings-row">
                 <div>
                   <div className="settings-row-label">Bubble size</div>
-                  <div className="settings-row-hint">{windowSize}</div>
+                  <div className="settings-row-hint">
+                    Currently {windowSize}. Controls how wide the quick-ask bubble is
+                  </div>
                 </div>
                 <input
                   type="range"
@@ -396,7 +640,10 @@ export default function SettingsView() {
                 />
               </div>
               <div className="settings-row settings-row-stack">
-                <div className="settings-row-label">Bubble corner</div>
+                <div>
+                  <div className="settings-row-label">Bubble corner</div>
+                  <div className="settings-row-hint">Which corner of the screen the bubble sits in</div>
+                </div>
                 <div className="settings-position-grid">
                   {POSITION_LABELS.map(({ value, label }) => (
                     <button
@@ -419,10 +666,10 @@ export default function SettingsView() {
               <div className="settings-account-card">
                 <p className="settings-row-hint">
                   {signedIn === null
-                    ? "Checking whether you’re signed in…"
+                    ? "Checking sign-in…"
                     : signedIn
-                      ? "Signed in. Chat history sync, states, and usage use this PROXY account."
-                      : "Sign in to sync states across devices and send chat messages."}
+                      ? "You’re signed in. States sync and chat messages use this PROXY account."
+                      : "Sign in to send chat messages and sync states across devices."}
                 </p>
                 <div className="settings-account-actions">
                   {signedIn ? (
@@ -449,7 +696,7 @@ export default function SettingsView() {
                   style={{ marginTop: 10 }}
                   onClick={() => api?.openExternal?.("https://getproxy.ca/account/billing")}
                 >
-                  Open billing on the website
+                  Open billing on getproxy.ca
                 </button>
                 <div className="settings-version">PROXY {appVersion || "…"}</div>
               </div>
@@ -459,10 +706,10 @@ export default function SettingsView() {
             <>
               <h2>Notifications</h2>
               <ToggleRow
-                label="Windows notifications"
-                hint="Show a notification when PROXY needs your attention"
+                label="Ready toast on launch"
+                hint="Shows a Windows notification with your open shortcut when PROXY starts"
                 checked={notificationsEnabled}
-                onChange={(e) => setNotificationsEnabled(e.target.checked)}
+                onChange={handleNotificationsChange}
               />
             </>
           )}
@@ -471,8 +718,8 @@ export default function SettingsView() {
             <>
               <h2>Privacy</h2>
               <ToggleRow
-                label="Share anonymous diagnostics"
-                hint="Sends crash and usage signals without chat contents"
+                label="Allow anonymous diagnostics"
+                hint="Local preference only for now. Chat text is never included in diagnostics"
                 checked={usageDataEnabled}
                 onChange={(e) => setUsageDataEnabled(e.target.checked)}
               />

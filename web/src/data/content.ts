@@ -27,8 +27,8 @@ export const proofItems = [
   'Windows app',
   'Web client',
   'Custom states',
+  'Speech-to-text',
   'Streaming replies',
-  'Small install',
 ] as const
 
 export const processSteps = [
@@ -42,13 +42,13 @@ export const processSteps = [
     step: '02',
     title: 'Pick or build a state',
     description:
-      'A state is a named trigger with instructions and options. Start with a built-in one, save a public state from the gallery, or write your own.',
+      'A state is a named trigger with instructions and options. Activate up to your plan’s slot limit, save gallery states, or create your own on Pro.',
   },
   {
     step: '03',
-    title: 'Chat with that setup',
+    title: 'Type or speak',
     description:
-      'Type a message, or put the state name first (for example Simplify hello). PROXY uses that state’s instructions for the reply.',
+      'Message PROXY with the keyboard, or use the mic to dictate. Put a state name first when you want that setup for the reply.',
   },
 ] as const
 
@@ -58,11 +58,12 @@ export const pricingPlans = [
     name: 'Free',
     price: '$0',
     period: '',
-    description: 'Sign in and try PROXY with a small lifetime chat allowance and three built-in states.',
+    description: 'Sign in and try PROXY with a small lifetime chat allowance and official states.',
     features: [
       'Up to about 30 requests (lifetime)',
-      'Three states: Simplify, List, and Critique',
+      'Access official states (activate up to 3 at a time)',
       'Windows app and PROXY Web chat',
+      'Speech-to-text dictation',
       'Browse the states gallery',
     ],
     popular: false,
@@ -79,7 +80,9 @@ export const pricingPlans = [
     features: [
       'Monthly chat allowance',
       'Create and publish custom states',
+      'Unlimited active states',
       'States sync across web and Windows',
+      'Speech-to-text dictation',
       'Billing and invoices on this site',
     ],
     popular: true,
@@ -111,12 +114,12 @@ export const faqs = [
   {
     question: 'What is PROXY?',
     answer:
-      'PROXY is a fast, customizable AI chat assistant for Windows and the web. You shape replies with reusable “states”, named triggers that carry instructions, so you are not rewriting the same system prompt every time.',
+      'PROXY is a fast, customizable AI chat assistant for Windows and the web. You shape replies with reusable “states”, named triggers that carry instructions, so you are not rewriting the same system prompt every time. You can type or dictate with speech-to-text.',
   },
   {
     question: 'What is a PROXY state?',
     answer:
-      'A state is a named chat setup: a trigger word, instructions, and optional model settings. In chat, put the trigger first, such as Simplify draft this email, and PROXY applies that state’s instructions to the reply.',
+      'A state is a named chat setup: a trigger word, instructions, and optional model settings. In chat, put the trigger first, such as Simplify draft this email, and PROXY applies that state’s instructions to the reply. Free accounts can activate up to three official states at a time; Pro unlocks creating custom states and unlimited actives.',
   },
   {
     question: 'What differentiates PROXY from other AI chatbots?',
@@ -126,7 +129,12 @@ export const faqs = [
   {
     question: 'Where can I use PROXY?',
     answer:
-      'On the Windows desktop app and in PROXY Web at getproxy.ca. Sign in with the same PROXY account on both so states and plan access stay in sync.',
+      'On the Windows desktop app (including the global shortcut bubble) and in PROXY Web at getproxy.ca. Sign in with the same PROXY account on both so states and plan access stay in sync.',
+  },
+  {
+    question: 'Can I speak instead of typing?',
+    answer:
+      'Yes. On Windows and PROXY Web, tap the microphone to record, then tap again to transcribe. Pick a mic in Settings (desktop) or the mic menu (web), that request is what prompts OS/browser permission. Audio is sent securely to PROXY’s speech provider (Whisper) for transcription and is not kept as a chat recording.',
   },
   {
     question: 'How do I get the Windows app?',
@@ -136,12 +144,12 @@ export const faqs = [
   {
     question: 'How much does PROXY cost?',
     answer:
-      'Free accounts can chat with a small lifetime allowance (about 30 requests) and three built-in states: Simplify, List, and Critique. Pro is $10 per month or $99 per year for a monthly chat allowance plus creating and publishing custom states. Billing is managed on getproxy.ca.',
+      'Free accounts can chat with a small lifetime allowance (about 30 requests) and activate up to three official states at a time. Pro is $10 per month or $99 per year for a monthly chat allowance plus creating and publishing custom states with unlimited actives. Billing is managed on getproxy.ca.',
   },
   {
     question: 'Do I need a paid plan to chat?',
     answer:
-      'No. Free accounts get up to about 30 requests (lifetime) and three states (Simplify, List, Critique). Subscribe when you need more chat capacity or want to create and publish your own states.',
+      'No. Free accounts get up to about 30 requests (lifetime) and can use official states within the three-active-slot limit. Subscribe when you need more chat capacity or want to create and publish your own states.',
   },
   {
     question: 'Where do I change my plan or payment method?',
@@ -151,7 +159,7 @@ export const faqs = [
   {
     question: 'Who makes PROXY?',
     answer:
-      'PROXY is built by Sterben. Support and contact: contact@sterben.dev. The Windows app source and releases live on GitHub at HSterben/Proxy.',
+      'PROXY is built by Sterben. Support and contact: sterben@sterben.dev. The Windows app source and releases live on GitHub at HSterben/Proxy.',
   },
 ]
 

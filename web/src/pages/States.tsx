@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ConvexClient } from 'convex/browser'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { BookmarkCheck, BookmarkPlus, Loader2, Search, Star, Trash2, X } from 'lucide-react'
+import { BookmarkCheck, BookmarkPlus, Check, Loader2, Search, Star, Trash2, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthSessionProvider'
 import { api } from '../convex/api'
 import { convexUrl } from '../lib/convexUrls'
@@ -208,12 +208,16 @@ export default function States() {
 
   const isSaved = (post: CommunityState) => post.savedByMe
 
+  const activeIdSet = useMemo(
+    () => new Set(libraryMeta.filter((row) => row.isActive).map((row) => row.id)),
+    [libraryMeta],
+  )
+
   const filteredPosts = useMemo(() => {
     if (!posts) return null
     const q = query.trim().toLowerCase()
     return posts.filter((post) => {
-      const saved = post.savedByMe
-      if (scope === 'saved' && !saved) return false
+      if (scope === 'saved' && !activeIdSet.has(post._id)) return false
       if (scope === 'starred' && !post.starredByMe) return false
       if (scope === 'official' && !post.isOfficial) return false
       if (activeTag && !(post.tags || []).includes(activeTag)) return false
@@ -229,11 +233,11 @@ export default function States() {
         .toLowerCase()
       return hay.includes(q)
     })
-  }, [posts, scope, activeTag, query])
+  }, [posts, scope, activeTag, query, activeIdSet])
 
-  const savedInViewCount = useMemo(
-    () => (posts ? posts.filter((p) => p.savedByMe).length : 0),
-    [posts],
+  const activeInViewCount = useMemo(
+    () => (posts ? posts.filter((p) => activeIdSet.has(p._id)).length : 0),
+    [posts, activeIdSet],
   )
 
   const handleSave = async (post: CommunityState) => {
@@ -306,7 +310,6 @@ export default function States() {
           ? prev.map((p) => (p._id === post._id ? { ...p, savedByMe: true } : p))
           : prev,
       )
-      showNotice(nextActive ? `Activated “${post.name}”` : `Deactivated “${post.name}”`)
     } catch (err) {
       setError(userFacingError(err, 'Could not update active States'))
     } finally {
@@ -553,8 +556,8 @@ export default function States() {
     { id: 'all', label: 'All' },
     {
       id: 'saved',
-      label: 'Saved',
-      count: user ? savedInViewCount || libraryCount : undefined,
+      label: 'Active',
+      count: user ? activeInViewCount || activeCount : undefined,
     },
     { id: 'starred', label: 'Starred' },
     { id: 'official', label: 'Official' },
@@ -689,8 +692,8 @@ export default function States() {
                     <span className="text-ink/50">System instruction</span>
                     <textarea
                       required
-                      rows={6}
-                      className="mt-1.5 w-full rounded-[10px] border border-hairline bg-white px-3 py-2.5 font-mono text-[13px]"
+                      rows={10}
+                      className="mt-1.5 max-h-72 min-h-[12rem] w-full resize-y overflow-y-auto rounded-[10px] border border-hairline bg-white px-3 py-2.5 font-mono text-[13px] leading-relaxed"
                       value={publishInstruction}
                       onChange={(e) => setPublishInstruction(e.target.value)}
                       placeholder="You are…"
@@ -890,7 +893,7 @@ export default function States() {
                   : `${activeCount} / ${activeLimit} active`}
                 {' · '}
                 {libraryCount} in library
-                {scope === 'saved' ? ' · showing saved gallery matches' : ''}
+                {scope === 'saved' ? ' · showing active States' : ''}
               </p>
             )}
           </div>
@@ -932,7 +935,9 @@ export default function States() {
                 const saved = isSaved(post)
                 const libRow = libraryMeta.find((row) => row.id === post._id)
                 const isActiveSlot = Boolean(libRow?.isActive)
-                const inLibrary = saved || Boolean(libRow) || post.isOfficial
+                const inLibrary = saved || Boolean(libRow)
+                // Official defaults can be activated directly (membership is created on demand).
+                const canActivate = inLibrary || post.isOfficial
                 const atActiveLimit =
                   !isActiveSlot &&
                   activeLimit != null &&
@@ -962,15 +967,6 @@ export default function States() {
                                 Official
                               </span>
                             )}
-                            {isActiveSlot ? (
-                              <span className="rounded-md border border-hairline px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/55">
-                                Active
-                              </span>
-                            ) : inLibrary ? (
-                              <span className="rounded-md border border-hairline px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/55">
-                                In library
-                              </span>
-                            ) : null}
                           </div>
                         </div>
                         <button
@@ -1018,38 +1014,126 @@ export default function States() {
                         {formatDate(post.createdAt)}
                       </p>
                       {instruction && (
-                        <pre className="mt-3 max-h-24 overflow-hidden rounded-[8px] bg-paper-muted p-3 text-[12px] leading-relaxed text-ink/70 whitespace-pre-wrap">
+                        <pre className="mt-3 max-h-56 overflow-y-auto rounded-[8px] bg-paper-muted p-3 text-[12px] leading-relaxed text-ink/70 whitespace-pre-wrap break-words">
                           {instruction}
                         </pre>
                       )}
                       <div className="mt-auto flex flex-wrap items-center gap-3 pt-5">
-                        {inLibrary ? (
+                        {canActivate ? (
                           <>
-                            <button
+                            <motion.button
                               type="button"
                               disabled={
-                                busyId === `active-${post._id}` || atActiveLimit
+                                busyId === `active-${post._id}` ||
+                                (!isActiveSlot && atActiveLimit)
                               }
                               title={
-                                atActiveLimit
+                                !isActiveSlot && atActiveLimit
                                   ? activeLimit === 5
                                     ? 'Beta accounts can have up to 5 active States.'
                                     : 'Free accounts can have up to 3 active States.'
-                                  : undefined
+                                  : isActiveSlot
+                                    ? 'Deactivate this State'
+                                    : 'Activate this State'
                               }
-                              className="pressable inline-flex min-h-10 items-center gap-2 rounded-[10px] bg-black px-4 text-[14px] font-semibold text-white disabled:opacity-60"
+                              className={`relative inline-flex h-10 w-[7.75rem] shrink-0 items-center justify-center overflow-hidden rounded-[10px] text-[14px] font-semibold transition-[background-color,border-color,color,box-shadow] duration-300 ease-out disabled:opacity-60 ${
+                                isActiveSlot
+                                  ? 'border border-emerald-600/20 bg-emerald-50 text-emerald-800 shadow-[inset_0_0_0_1px_rgba(5,150,105,0.06)]'
+                                  : 'border border-transparent bg-black text-white'
+                              }`}
                               onClick={() => void handleToggleActive(post)}
+                              whileTap={
+                                reduceMotion || busyId === `active-${post._id}`
+                                  ? undefined
+                                  : { scale: 0.985 }
+                              }
+                              transition={{ type: 'spring', stiffness: 520, damping: 32 }}
                             >
-                              {busyId === `active-${post._id}` ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : null}
-                              {isActiveSlot
-                                ? 'Deactivate'
-                                : atActiveLimit
-                                  ? 'Slots full'
-                                  : 'Activate'}
-                            </button>
-                            {!post.isOfficial ? (
+                              <AnimatePresence mode="popLayout" initial={false}>
+                                {busyId === `active-${post._id}` ? (
+                                  <motion.span
+                                    key="busy"
+                                    className="absolute inset-0 inline-flex items-center justify-center gap-1.5"
+                                    initial={reduceMotion ? false : { opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={reduceMotion ? undefined : { opacity: 0 }}
+                                    transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                                  >
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin opacity-80" />
+                                  </motion.span>
+                                ) : isActiveSlot ? (
+                                  <motion.span
+                                    key="active"
+                                    className="absolute inset-0 inline-flex items-center justify-center gap-1.5"
+                                    initial={
+                                      reduceMotion ? false : { opacity: 0, y: 6 }
+                                    }
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={
+                                      reduceMotion
+                                        ? undefined
+                                        : { opacity: 0, y: -6 }
+                                    }
+                                    transition={{
+                                      duration: 0.22,
+                                      ease: [0.22, 1, 0.36, 1],
+                                    }}
+                                  >
+                                    <motion.span
+                                      initial={
+                                        reduceMotion ? false : { scale: 0.6, opacity: 0 }
+                                      }
+                                      animate={{ scale: 1, opacity: 1 }}
+                                      transition={{
+                                        type: 'spring',
+                                        stiffness: 480,
+                                        damping: 22,
+                                        delay: 0.04,
+                                      }}
+                                      className="inline-flex"
+                                    >
+                                      <Check
+                                        className="h-3.5 w-3.5 text-emerald-600"
+                                        strokeWidth={2.75}
+                                      />
+                                    </motion.span>
+                                    Active
+                                  </motion.span>
+                                ) : atActiveLimit ? (
+                                  <motion.span
+                                    key="full"
+                                    className="absolute inset-0 inline-flex items-center justify-center"
+                                    initial={reduceMotion ? false : { opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={reduceMotion ? undefined : { opacity: 0 }}
+                                    transition={{ duration: 0.18 }}
+                                  >
+                                    Slots full
+                                  </motion.span>
+                                ) : (
+                                  <motion.span
+                                    key="idle"
+                                    className="absolute inset-0 inline-flex items-center justify-center"
+                                    initial={
+                                      reduceMotion ? false : { opacity: 0, y: 6 }
+                                    }
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={
+                                      reduceMotion
+                                        ? undefined
+                                        : { opacity: 0, y: -6 }
+                                    }
+                                    transition={{
+                                      duration: 0.22,
+                                      ease: [0.22, 1, 0.36, 1],
+                                    }}
+                                  >
+                                    Activate
+                                  </motion.span>
+                                )}
+                              </AnimatePresence>
+                            </motion.button>
+                            {inLibrary && !post.isOfficial ? (
                               <button
                                 type="button"
                                 disabled={busyId === `lib-${post._id}`}
@@ -1163,8 +1247,8 @@ export default function States() {
                 <label className="block text-[14px]">
                   <span className="text-ink/50">System instruction</span>
                   <textarea
-                    className="mt-1 w-full rounded-[10px] border border-hairline bg-white px-3 py-2 font-mono text-[13px]"
-                    rows={5}
+                    className="mt-1 max-h-72 min-h-[12rem] w-full resize-y overflow-y-auto rounded-[10px] border border-hairline bg-white px-3 py-2 font-mono text-[13px] leading-relaxed"
+                    rows={10}
                     value={editInstruction}
                     onChange={(e) => setEditInstruction(e.target.value)}
                   />

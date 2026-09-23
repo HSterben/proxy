@@ -125,6 +125,15 @@ export default function Account() {
       } catch {
         // migration optional until Convex is reachable
       }
+      // WorkOS access tokens often omit email; keep the users row in sync so
+      // admin checks (@sterben.dev) and billing can resolve the account.
+      if (typeof user.email === 'string' && user.email.includes('@')) {
+        try {
+          await convex.current.mutation(api.users.setMyEmail, { email: user.email })
+        } catch {
+          /* optional */
+        }
+      }
       void convex.current
         .query(api.account.getMyAccount, {})
         .then((data) => setAccount(data as AccountSnapshot | null))

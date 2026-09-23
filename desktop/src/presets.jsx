@@ -1,10 +1,12 @@
-import { createRoot } from "react-dom/client";
-import { initTheme } from "./hooks/useTheme";
-import PresetsView from "./views/PresetsView";
-import "./index.css";
+import { createRoot } from 'react-dom/client';
+import { ThemeBridge } from './hooks/useTheme';
+import PresetsView from './views/PresetsView';
+import './index.css';
 
-initTheme();
-
-const container = document.getElementById("root");
+const container = document.getElementById('root');
 const root = createRoot(container);
-root.render(<PresetsView />);
+root.render(
+  <ThemeBridge>
+    <PresetsView />
+  </ThemeBridge>,
+);

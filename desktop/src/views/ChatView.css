@@ -775,11 +775,12 @@ html, body {
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
+  overflow-anchor: none;
   padding: 16px 24px 12px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   position: relative;
   min-height: 0;
   -webkit-app-region: no-drag;
@@ -1044,6 +1045,84 @@ html, body {
   vertical-align: baseline;
 }
 
+.message-thinking {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0;
+  min-height: 40px;
+  line-height: 0;
+}
+
+.message-thinking-orb {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: block;
+}
+
+.message-thinking-orb > canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: scale(0.625);
+  transform-origin: 0 0;
+}
+
+.message-thinking-label {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-text-primary) 35%, transparent) 0%,
+    color-mix(in srgb, var(--color-text-primary) 35%, transparent) 35%,
+    var(--color-text-primary) 50%,
+    color-mix(in srgb, var(--color-text-primary) 35%, transparent) 65%,
+    color-mix(in srgb, var(--color-text-primary) 35%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-shine 1.6s linear infinite;
+}
+
+.message-bubble.is-thinking,
+.message-ai .message-bubble.is-thinking {
+  width: fit-content;
+  max-width: fit-content;
+  padding: 8px 12px;
+  gap: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.message-bubble.is-thinking .message-text,
+.message-bubble.is-thinking .message-text-streaming {
+  padding: 0;
+  line-height: 0;
+  white-space: normal;
+}
+
+@keyframes thinking-shine {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 @keyframes blink {
   0%, 50% {
     opacity: 1;
@@ -1164,6 +1243,24 @@ html, body {
   display: none;
 }
 
+.chat-composer-form {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-voice-beam {
+  margin: 0 18px 18px;
+  flex-shrink: 0;
+  min-width: 0;
+  display: block;
+}
+
+.chat-voice-beam .chat-input-container {
+  margin: 0;
+}
+
 .chat-input-container {
   display: flex;
   flex-direction: column;
@@ -1216,10 +1313,48 @@ html, body {
 }
 
 .chat-attach-button:focus-visible,
+.chat-mic-button:focus-visible,
 .chat-input-submit:focus-visible,
 .chat-input-field:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+.chat-mic-button {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.chat-mic-button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.chat-mic-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-mic-button.is-listening {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.chat-speech-notice {
+  margin: 8px 4px 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-danger);
 }
 
 .chat-input-field {

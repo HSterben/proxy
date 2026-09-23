@@ -21,6 +21,19 @@ export async function initTheme() {
   }
 }
 
+/** Keep this window’s theme in sync when Settings (or system) changes it. */
+export function ThemeBridge({ children }) {
+  useEffect(() => {
+    void initTheme();
+    const unsub = api?.onThemeChanged?.(({ effective }) => {
+      applyTheme(effective);
+    });
+    return typeof unsub === 'function' ? unsub : undefined;
+  }, []);
+
+  return children ?? null;
+}
+
 export function useTheme() {
   const [preference, setPreference] = useState('system');
   const [effective, setEffective] = useState('dark');

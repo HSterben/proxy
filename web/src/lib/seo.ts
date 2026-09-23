@@ -52,7 +52,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/contact': {
     title: `Contact PROXY | Support and partnerships`,
     description:
-      'Contact the PROXY team about the Windows app, PROXY Web, billing, states, or partnerships. Email contact@sterben.dev or use the form on this page.',
+      'Contact the PROXY team about the Windows app, PROXY Web, billing, states, or partnerships. Email sterben@sterben.dev or use the form on this page.',
     path: '/contact',
     index: true,
   },

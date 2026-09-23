@@ -53,6 +53,8 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "update-electron-app": "^3.3.0"
+    "thinking-orbs": "^0.3.1",
+    "update-electron-app": "^3.3.0",
+    "voice-glow": "^0.2.0"
   }
 }

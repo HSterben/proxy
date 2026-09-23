@@ -13,6 +13,7 @@ import type * as admin from "../admin.js";
 import type * as ai_identity from "../ai/identity.js";
 import type * as ai_model from "../ai/model.js";
 import type * as ai_provider from "../ai/provider.js";
+import type * as ai_transcribe from "../ai/transcribe.js";
 import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
 import type * as defaultStates from "../defaultStates.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   "ai/identity": typeof ai_identity;
   "ai/model": typeof ai_model;
   "ai/provider": typeof ai_provider;
+  "ai/transcribe": typeof ai_transcribe;
   auth: typeof auth;
   billing: typeof billing;
   defaultStates: typeof defaultStates;
