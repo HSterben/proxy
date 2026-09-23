@@ -130,6 +130,7 @@ body {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  overflow: visible;
   -webkit-app-region: no-drag;
 }
 
@@ -164,11 +165,19 @@ body {
   margin-top: 8px;
   min-height: 36px;
   flex-shrink: 0;
+  overflow: visible;
+  position: relative;
+  z-index: 2;
 }
 
 .bubble-state-menu {
   position: relative;
   flex-shrink: 0;
+  z-index: 1;
+}
+
+.bubble-state-menu.is-open {
+  z-index: 40;
 }
 
 /* State pill */
@@ -213,19 +222,28 @@ body {
 
 .bubble-state-options {
   position: absolute;
-  z-index: 10;
-  bottom: calc(100% + 7px);
+  z-index: 50;
+  bottom: calc(100% + 6px);
   left: 0;
   min-width: 152px;
   max-width: 220px;
-  max-height: 128px;
+  max-height: min(160px, calc(100vh - 72px));
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  transform: translateY(6px);
+  scrollbar-width: thin;
+}
+
+.bubble-state-options--portal {
+  position: fixed;
+  right: auto;
+  top: auto;
+  z-index: 10000;
 }
 
 .bubble-state-option {

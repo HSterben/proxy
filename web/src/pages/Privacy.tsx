@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import Reveal from '../components/ui/Reveal'
 import { SITE_LINKS } from '../lib/site'
 
-const LAST_UPDATED = 'September 21, 2026'
+const LAST_UPDATED = 'September 23, 2026'
 
 type Section = {
   id: string
@@ -35,22 +35,32 @@ const sections: Section[] = [
     ],
     afterBullets: [
       'We use this information to create and secure your account, sync access across web and Windows, enforce plan limits, and communicate about the Services (including support replies).',
+      'If you contact us through the website contact form or email, we receive the message content and any contact details you include so we can respond. We use that information for support only, not for marketing lists.',
     ],
   },
   {
     id: 'ai',
-    title: '3. Prompts, states, and AI interactions',
+    title: '3. Prompts, states, attachments, and AI interactions',
     paragraphs: [
-      'When you chat, your messages, attached content you upload for a request, conversation context you send, and active state instructions (system prompts / triggers) are processed so we can generate a reply.',
+      'When you chat, your messages, files you attach for a request (such as images or PDFs), conversation context you send, and active state instructions (system prompts / triggers) are processed so we can generate a reply.',
       'That content is transmitted to our backend and to our AI provider(s) to complete the request. Do not submit secrets, passwords, payment card numbers, or information you are not allowed to share.',
-      'If you use speech-to-text, a short audio clip from your microphone is sent to our backend and to a speech transcription provider (Whisper-compatible, such as Groq or OpenAI) to produce text for the composer. We use that audio only to generate the transcript for your request; we do not sell voice recordings or use them to train our own models.',
-      'We also store PROXY “states” you create or save (trigger names, instructions, and related settings), including states you publish to the gallery when you choose to make them public.',
+      'We also store PROXY “states” you create or save (trigger names, instructions, and related settings), including states you publish to the gallery when you choose to make them public. Plan entitlements may limit how many states you can keep active or create.',
       'Chat transcripts may be held temporarily in your client session for continuity. We process prompts server-side to fulfill requests and to measure usage; we do not sell your prompts. Provider processing is also subject to the AI provider’s own terms and privacy practices.',
     ],
   },
   {
+    id: 'microphone',
+    title: '4. Microphone and speech-to-text',
+    paragraphs: [
+      'PROXY Web and the Windows app can optionally use your microphone for dictation. Dictation is off until you start it (for example by clicking the mic control). Your browser or operating system may also ask for microphone permission; you can deny or later revoke that permission at any time.',
+      'When you dictate, a short audio recording of that utterance is sent to our backend and then to a speech transcription provider (Whisper-compatible, such as Groq or OpenAI) to produce text for the composer. We use that audio only to generate the transcript for your request. We do not sell voice recordings, do not use them to train our own models, and do not keep the audio clip as a lasting account feature after transcription completes (ordinary server logs or backups may retain transient processing artifacts for a short period).',
+      'The resulting transcript is treated like other text you type into the composer: if you send it as a chat message, it is processed under Section 3 like any other prompt.',
+      'On Windows, you can turn the microphone feature off in Settings and choose an input device. Those preferences are stored locally on your device (and related client settings), not as a shared voice profile on our servers.',
+    ],
+  },
+  {
     id: 'usage',
-    title: '4. Usage and technical data',
+    title: '5. Usage, preferences, and technical data',
     paragraphs: [
       'We collect operational data needed to run and protect the Services, which may include:',
     ],
@@ -58,23 +68,25 @@ const sections: Section[] = [
       'Approximate usage metrics (for example request counts or weighted token usage against free or paid allowances)',
       'IP address and related network signals used for abuse prevention (such as free-tier signup limits)',
       'Device, browser, or app version information when provided by the client',
-      'Diagnostic logs (errors, auth events, billing webhooks) used for reliability and security',
+      'Diagnostic logs (errors, auth events, billing webhooks, transcription failures) used for reliability and security',
       'Cookies or local storage used for session continuity on the website',
+      'Local app preferences on Windows (for example theme, bubble size/position, shortcuts, typed-state overrides, microphone on/off, and preferred mic device)',
     ],
   },
   {
     id: 'processors',
-    title: '5. Service providers and processors',
+    title: '6. Service providers and processors',
     paragraphs: [
       'We use third parties to operate PROXY. They process data only as needed to provide their services to us:',
     ],
     bullets: [
-      'Convex, application database, backend functions, and HTTP APIs that power accounts, states, usage, and chat endpoints',
+      'Convex, application database, backend functions, and HTTP APIs that power accounts, states, usage, chat, and transcription endpoints',
       'WorkOS, authentication and identity (sign-in, sessions, user lifecycle events)',
-      'AI providers, model inference for generating chat responses from your prompts and state instructions',
+      'AI providers, model inference for generating chat responses from your prompts, attachments, and state instructions',
       'Speech transcription providers (for example Groq or OpenAI Whisper) when you use the microphone to dictate',
       'Stripe, payment processing for paid plans (card details are handled by Stripe; we receive subscription and customer identifiers, plan status, and related billing metadata)',
       'Hosting and delivery providers for getproxy.ca and related infrastructure',
+      'Email delivery for contact-form and transactional messages when configured',
     ],
     afterBullets: [
       'We do not sell your personal information. We may disclose information if required by law, to protect rights and safety, or in connection with a business transfer (for example a merger), with appropriate safeguards.',
@@ -82,16 +94,17 @@ const sections: Section[] = [
   },
   {
     id: 'payments',
-    title: '6. Payments (Stripe)',
+    title: '7. Payments (Stripe)',
     paragraphs: [
       'If you subscribe to a paid plan, billing is handled through Stripe Checkout and the Stripe Customer Portal on getproxy.ca. Stripe processes payment method details under its own privacy policy. We store subscription status, plan, and Stripe customer/subscription IDs needed to unlock Pro features and manage entitlements across web and Windows.',
     ],
   },
   {
     id: 'retention',
-    title: '7. Retention and deletion',
+    title: '8. Retention and deletion',
     paragraphs: [
       'We retain account, state, usage, and billing linkage data for as long as your account is active and as needed to provide the Services, comply with law, resolve disputes, and enforce agreements.',
+      'Microphone audio used for dictation is processed to produce a transcript and is not retained by PROXY as a user-accessible recording library. Transcripts you keep in a chat are retained according to how that conversation is stored in your client session and any server-side processing described above.',
       'You can delete your PROXY account yourself while signed in: open Account on getproxy.ca, choose Delete my account, and type the confirmation phrase shown there. That permanently removes PROXY profile data we control (including your display profile, states you own, library memberships, usage records, and related subscription rows in our database). Cancel any active paid plan under Account → Billing before deleting if you want billing to stop.',
       'Self-serve deletion does not automatically cancel Stripe billing or erase your WorkOS sign-in identity held by those processors. Residual copies may remain briefly in backups or logs until rotated in the ordinary course of operations.',
       'If deletion fails, something looks incomplete, or you need help with processor-side records (for example Stripe invoices or WorkOS identity), contact us (see Contact below) and we will help complete the request subject to legal retention needs.',
@@ -99,42 +112,43 @@ const sections: Section[] = [
   },
   {
     id: 'security',
-    title: '8. Security',
+    title: '9. Security',
     paragraphs: [
       'We use industry-standard measures appropriate to the nature of the Services, including encrypted transport (HTTPS), authenticated API access (bearer tokens / sessions), and access controls on backend systems. No method of transmission or storage is completely secure; we cannot guarantee absolute security.',
     ],
   },
   {
     id: 'rights',
-    title: '9. Your rights and choices',
+    title: '10. Your rights and choices',
     paragraphs: [
       'Depending on where you live, you may have rights to access, correct, delete, or obtain a copy of personal information we hold about you, or to object to or restrict certain processing. You can delete your PROXY account in-product as described above. For other requests, email us at the address below. We may need to verify your identity before responding.',
-      'You can update some profile information in-product, manage billing through Stripe’s portal, and sign out of sessions. If you run into issues deleting your account or need help afterward, contact us.',
+      'You can update some profile information in-product, manage billing through Stripe’s portal, and sign out of sessions. On Windows you can disable microphone dictation in Settings; on web and Windows you can refuse or revoke microphone permission in your browser or OS. If you run into issues deleting your account or need help afterward, contact us.',
     ],
-  },  {
+  },
+  {
     id: 'children',
-    title: '10. Children',
+    title: '11. Children',
     paragraphs: [
       'The Services are not directed to children under 13 (or the minimum age required in your jurisdiction). We do not knowingly collect personal information from children. If you believe a child has provided us data, contact us and we will take appropriate steps to delete it.',
     ],
   },
   {
     id: 'international',
-    title: '11. International processing',
+    title: '12. International processing',
     paragraphs: [
       'PROXY and its processors may process data in the United States and other countries. If you access the Services from another region, your information may be transferred to and processed in countries that may have different data-protection laws than your own.',
     ],
   },
   {
     id: 'changes',
-    title: '12. Changes to this Policy',
+    title: '13. Changes to this Policy',
     paragraphs: [
       'We may update this Privacy Policy from time to time. We will post the revised version at https://getproxy.ca/privacy and update the “Last updated” date. Material changes may also be highlighted on the site or by email when appropriate. Continued use of the Services after an update means you accept the revised Policy.',
     ],
   },
   {
     id: 'contact',
-    title: '13. Contact',
+    title: '14. Contact',
     paragraphs: [
       'Questions about privacy, data requests, or this Policy:',
     ],

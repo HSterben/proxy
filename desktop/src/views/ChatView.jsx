@@ -29,7 +29,7 @@ import {
 import { ThinkingOrb } from 'thinking-orbs';
 import { useSpeechToText } from '../hooks/useSpeechToText';
 import { getStoredMicDeviceId } from '../lib/speechToText';
-import { VoiceBeam, getAudioContext } from 'voice-glow';
+import { getAudioContext } from 'voice-glow';
 import 'katex/dist/katex.min.css';
 import './ChatView.css';
 
@@ -266,7 +266,6 @@ const ChatView = () => {
     supported: speechSupported,
     listening,
     transcribing,
-    stream: micStream,
     stop: stopSpeech,
     toggle: toggleSpeech,
   } = useSpeechToText({
@@ -290,11 +289,6 @@ const ChatView = () => {
       void stopSpeech();
     }
   }, [micEnabled, listening, transcribing, stopSpeech]);
-
-  const voiceTheme =
-    typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light'
-      ? 'light'
-      : 'dark';
 
   const handleMicClick = () => {
     try {
@@ -1718,16 +1712,6 @@ const ChatView = () => {
         )}
 
         <form className="chat-composer-form" onSubmit={handleSubmit}>
-          <VoiceBeam
-            className="chat-voice-beam"
-            type="default"
-            stream={micStream}
-            processing={isLoading || transcribing}
-            colorVariant="ocean"
-            theme={voiceTheme}
-            active={Boolean(micStream) || isLoading || transcribing}
-            strength={0.9}
-          >
             <div className="chat-input-container">
           {attachedFiles.length > 0 && (
             <div className="chat-attachments" aria-label="Attachments">
@@ -1841,7 +1825,6 @@ const ChatView = () => {
             </button>
           </div>
             </div>
-          </VoiceBeam>
           {speechNotice ? (
             <p className="chat-speech-notice" role="status">
               {speechNotice}

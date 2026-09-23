@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ConvexClient } from "convex/browser";
 import { api as convexApi } from "../../../backend/convex/_generated/api";
 import TitleBar from "../components/TitleBar";
+import AccountAvatar from "../components/AccountAvatar";
 import { convexUrl } from "../lib/convexUrls";
 import { userFacingError } from "../lib/userFacingError";
 import { clampOutputTokens } from "../lib/contextBudget";
+import { useMyProfile } from "../hooks/useMyProfile";
 import "./SettingsView.css";
 import "./PresetsView.css";
 import "../components/AppShell.css";
@@ -243,6 +245,12 @@ function presetsToEntries(presets, previousEntries = [], library = null) {
 
 export default function PresetsView() {
   const convex = useRef(new ConvexClient(convexUrl));
+  const {
+    loading: profileLoading,
+    signedIn: profileSignedIn,
+    displayName,
+    avatarUrl,
+  } = useMyProfile();
   const scrollRef = useRef(null);
   const dirtyRef = useRef(false);
   const loadingRef = useRef(false);
@@ -700,17 +708,33 @@ export default function PresetsView() {
 
           <div className="presets-account-bar">
             <div className="presets-account-status">
-              {signedIn === null ? (
-                <span className="presets-account-label">Checking whether you’re signed in…</span>
-              ) : signedIn ? (
-                <span className="presets-account-label presets-account-label-on">
-                  Signed in · states sync to your PROXY account
-                </span>
-              ) : (
-                <span className="presets-account-label">
-                  Signed out · states stay on this device until you sign in
-                </span>
-              )}
+              <div className="presets-account-identity">
+                <AccountAvatar
+                  name={displayName || (signedIn ? "Account" : "Sign in")}
+                  src={profileSignedIn ? avatarUrl : null}
+                  size={32}
+                />
+                <div className="presets-account-identity-text">
+                  <div className="presets-account-name">
+                    {profileLoading && signedIn !== false
+                      ? "Loading…"
+                      : signedIn
+                        ? displayName || "PROXY account"
+                        : "Not signed in"}
+                  </div>
+                  {signedIn === null ? (
+                    <span className="presets-account-label">Checking whether you’re signed in…</span>
+                  ) : signedIn ? (
+                    <span className="presets-account-label presets-account-label-on">
+                      States sync to your PROXY account
+                    </span>
+                  ) : (
+                    <span className="presets-account-label">
+                      States stay on this device until you sign in
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="presets-account-actions">
               <button

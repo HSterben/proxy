@@ -1,5 +1,6 @@
 // View: Quick launch shortcut bubble
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import ProxyMark from '../components/ProxyMark';
 import {
   FREE_DEFAULT_PRESETS,
@@ -53,6 +54,7 @@ const ChatBubbleView = () => {
   const [activePreset, setActivePreset] = useState('');
   const [typedStateOverrides, setTypedStateOverrides] = useState(true);
   const [stateMenuOpen, setStateMenuOpen] = useState(false);
+  const [stateMenuPos, setStateMenuPos] = useState(null);
   const [micDeviceId, setMicDeviceId] = useState(() => getStoredMicDeviceId());
   const [micEnabled, setMicEnabled] = useState(true);
   const [speechNotice, setSpeechNotice] = useState('');
@@ -60,6 +62,9 @@ const ChatBubbleView = () => {
   const dictationPrefixRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const stateMenuRef = useRef(null);
+  const statePillRef = useRef(null);
+  const stateOptionsRef = useRef(null);
   const syncingRef = useRef(false);
   const lastCloudSyncRef = useRef(0);
   const presetsRef = useRef({});
@@ -74,6 +79,58 @@ const ChatBubbleView = () => {
   useEffect(() => {
     messageRef.current = message;
   }, [message]);
+
+  useEffect(() => {
+    if (!stateMenuOpen) return;
+    const onPointerDown = (e) => {
+      const inTrigger = stateMenuRef.current?.contains(e.target);
+      const inOptions = stateOptionsRef.current?.contains(e.target);
+      if (!inTrigger && !inOptions) setStateMenuOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setStateMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [stateMenuOpen]);
+
+  // Portal + fixed position: VoiceBeam uses overflow:hidden, which clips in-tree menus.
+  useLayoutEffect(() => {
+    if (!stateMenuOpen) {
+      setStateMenuPos(null);
+      return;
+    }
+
+    const placeMenu = () => {
+      const trigger = statePillRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const gap = 6;
+      const edgePad = 8;
+      const maxHeight = Math.max(96, Math.min(220, Math.floor(rect.top - gap - edgePad)));
+      setStateMenuPos({
+        left: Math.round(rect.left),
+        bottom: Math.round(window.innerHeight - rect.top + gap),
+        minWidth: Math.round(Math.max(152, rect.width)),
+        maxHeight,
+      });
+    };
+
+    placeMenu();
+    const raf = requestAnimationFrame(() => {
+      const active = stateOptionsRef.current?.querySelector('.bubble-state-option.is-active');
+      active?.scrollIntoView({ block: 'nearest' });
+    });
+    window.addEventListener('resize', placeMenu);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', placeMenu);
+    };
+  }, [stateMenuOpen, presets]);
 
   useEffect(() => {
     let cancelled = false;
@@ -350,6 +407,7 @@ const ChatBubbleView = () => {
 
   const presetNames = Object.keys(presets).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   const stateLabel = activePreset || 'Default';
+  const micBeamActive = Boolean(micStream) || listening || transcribing;
 
   const clearComposer = useCallback(() => {
     clearSpeechSession();
@@ -410,6 +468,159 @@ const ChatBubbleView = () => {
     }
   };
 
+  const inputBox = (
+    <div className="bubble-input-box">
+      {attachedFiles.length > 0 && (
+        <div className="bubble-attachments">
+          {attachedFiles.map((file, idx) => (
+            <div key={`${file.name}-${idx}`} className="bubble-attachment-item">
+              <img src={file.dataUrl} alt={file.name} className="bubble-attachment-thumb" />
+              <button
+                type="button"
+                className="bubble-attachment-remove"
+                aria-label="Remove attachment"
+                onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <textarea
+        ref={textareaRef}
+        className="bubble-textarea"
+        placeholder="Ask PROXY…"
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        onKeyDown={handleKeyDown}
+        rows={3}
+        spellCheck
+        autoComplete="off"
+        autoCorrect="off"
+      />
+
+      <div className="bubble-input-footer">
+        <div className={`bubble-state-menu${stateMenuOpen ? ' is-open' : ''}`} ref={stateMenuRef}>
+          <button
+            ref={statePillRef}
+            type="button"
+            className="bubble-state-pill"
+            onClick={() => setStateMenuOpen((open) => !open)}
+            aria-haspopup="listbox"
+            aria-expanded={stateMenuOpen}
+          >
+            <svg className="bubble-state-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg>
+            <span className="bubble-state-label">{stateLabel}</span>
+            <svg className="bubble-state-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          {stateMenuOpen &&
+            stateMenuPos &&
+            createPortal(
+              <div
+                ref={stateOptionsRef}
+                className="bubble-state-options bubble-state-options--portal"
+                role="listbox"
+                aria-label="State"
+                style={{
+                  left: stateMenuPos.left,
+                  bottom: stateMenuPos.bottom,
+                  minWidth: stateMenuPos.minWidth,
+                  maxHeight: stateMenuPos.maxHeight,
+                }}
+              >
+                {[{ value: '', label: 'Default' }, ...presetNames.map((name) => ({ value: name, label: name }))].map(
+                  ({ value, label }) => (
+                    <button
+                      key={value || 'default'}
+                      type="button"
+                      className={`bubble-state-option${activePreset === value ? ' is-active' : ''}`}
+                      role="option"
+                      aria-selected={activePreset === value}
+                      onClick={() => {
+                        setActivePreset(value);
+                        setStateMenuOpen(false);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ),
+                )}
+              </div>,
+              document.body,
+            )}
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="bubble-file-input"
+          accept="image/*,application/pdf"
+          multiple
+          onChange={handleFileSelect}
+          aria-label="Attach file"
+        />
+        <button
+          type="button"
+          className="bubble-attach"
+          onClick={() => fileInputRef.current?.click()}
+          aria-label="Attach file"
+          title="Attach image or PDF"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
+
+        {speechSupported && micEnabled ? (
+          <button
+            type="button"
+            className={`bubble-mic${listening || transcribing ? ' is-listening' : ''}`}
+            onClick={handleMicClick}
+            disabled={transcribing}
+            aria-label={
+              transcribing ? 'Transcribing' : listening ? 'Stop dictation' : 'Start dictation'
+            }
+            title={
+              transcribing
+                ? 'Transcribing…'
+                : listening
+                  ? 'Stop and transcribe'
+                  : 'Click to speak, click again to transcribe'
+            }
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          </button>
+        ) : null}
+
+        {attachedFiles.length > 0 && (
+          <span className="bubble-attach-badge">+{attachedFiles.length}</span>
+        )}
+
+        <button
+          type="submit"
+          className="bubble-send"
+          disabled={!message.trim() && attachedFiles.length === 0}
+          aria-label="Send"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="bubble-window">
       <header className="bubble-titlebar">
@@ -421,150 +632,22 @@ const ChatBubbleView = () => {
       </header>
 
       <form className="bubble-composer-form" onSubmit={handleSubmit}>
-        <VoiceBeam
-          className="bubble-voice-beam"
-          type="default"
-          stream={micStream}
-          processing={transcribing}
-          colorVariant="ocean"
-          theme={voiceTheme}
-          active={Boolean(micStream) || transcribing}
-          strength={0.9}
-        >
-          <div className="bubble-input-box">
-        {attachedFiles.length > 0 && (
-          <div className="bubble-attachments">
-            {attachedFiles.map((file, idx) => (
-              <div key={`${file.name}-${idx}`} className="bubble-attachment-item">
-                <img src={file.dataUrl} alt={file.name} className="bubble-attachment-thumb" />
-                <button
-                  type="button"
-                  className="bubble-attachment-remove"
-                  aria-label="Remove attachment"
-                  onClick={() => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
+        {micBeamActive ? (
+          <VoiceBeam
+            className="bubble-voice-beam"
+            type="default"
+            stream={micStream}
+            processing={transcribing}
+            colorVariant="ocean"
+            theme={voiceTheme}
+            active
+            strength={0.9}
+          >
+            {inputBox}
+          </VoiceBeam>
+        ) : (
+          <div className="bubble-voice-beam">{inputBox}</div>
         )}
-
-        <textarea
-          ref={textareaRef}
-          className="bubble-textarea"
-          placeholder="Ask PROXY…"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={3}
-          spellCheck
-          autoComplete="off"
-          autoCorrect="off"
-        />
-
-        <div className="bubble-input-footer">
-          <div className="bubble-state-menu">
-            <button
-              type="button"
-              className="bubble-state-pill"
-              onClick={() => setStateMenuOpen((open) => !open)}
-              aria-haspopup="listbox"
-              aria-expanded={stateMenuOpen}
-            >
-              <svg className="bubble-state-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-              </svg>
-              <span className="bubble-state-label">{stateLabel}</span>
-              <svg className="bubble-state-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            {stateMenuOpen && (
-              <div className="bubble-state-options" role="listbox" aria-label="State">
-                {[{ value: '', label: 'Default' }, ...presetNames.map((name) => ({ value: name, label: name }))].map(({ value, label }) => (
-                  <button
-                    key={value || 'default'}
-                    type="button"
-                    className={`bubble-state-option${activePreset === value ? ' is-active' : ''}`}
-                    role="option"
-                    aria-selected={activePreset === value}
-                    onClick={() => {
-                      setActivePreset(value);
-                      setStateMenuOpen(false);
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="bubble-file-input"
-            accept="image/*,application/pdf"
-            multiple
-            onChange={handleFileSelect}
-            aria-label="Attach file"
-          />
-          <button
-            type="button"
-            className="bubble-attach"
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Attach file"
-            title="Attach image or PDF"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
-
-          {speechSupported && micEnabled ? (
-            <button
-              type="button"
-              className={`bubble-mic${listening || transcribing ? ' is-listening' : ''}`}
-              onClick={handleMicClick}
-              disabled={transcribing}
-              aria-label={
-                transcribing ? 'Transcribing' : listening ? 'Stop dictation' : 'Start dictation'
-              }
-              title={
-                transcribing
-                  ? 'Transcribing…'
-                  : listening
-                    ? 'Stop and transcribe'
-                    : 'Click to speak, click again to transcribe'
-              }
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
-            </button>
-          ) : null}
-
-          {attachedFiles.length > 0 && (
-            <span className="bubble-attach-badge">+{attachedFiles.length}</span>
-          )}
-
-          <button
-            type="submit"
-            className="bubble-send"
-            disabled={!message.trim() && attachedFiles.length === 0}
-            aria-label="Send"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
-          </button>
-        </div>
-          </div>
-        </VoiceBeam>
         {speechNotice ? (
           <p className="bubble-speech-notice" role="status">
             {speechNotice}

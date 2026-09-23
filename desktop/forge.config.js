@@ -17,6 +17,27 @@ module.exports = {
   rebuildConfig: {},
   makers: [
     {
+      // Public Windows installer: PROXY-Setup.exe + nupkg/RELEASES for auto-update
+      name: "@electron-forge/maker-squirrel",
+      config: {
+        name: "PROXY",
+        authors: "Sterben",
+        description: "PROXY - AI chat assistant",
+        setupExe: "PROXY-Setup.exe",
+        setupIcon: path.join(
+          __dirname,
+          "..",
+          "backend",
+          "public",
+          "Proxy-Icon-Light.ico"
+        ),
+        ...(process.env.CERT_FILE && {
+          certificateFile: process.env.CERT_FILE,
+          certificatePassword: process.env.CERT_PASSWORD,
+        }),
+      },
+    },
+    {
       name: "@electron-forge/maker-msix",
       config: {
         logLevel: "warn",

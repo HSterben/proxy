@@ -1,5 +1,7 @@
 import ProxyMark from './ProxyMark';
 import TitleBar from './TitleBar';
+import AccountAvatar from './AccountAvatar';
+import { useMyProfile } from '../hooks/useMyProfile';
 import './AppShell.css';
 
 const api = typeof window !== 'undefined' ? window.electronAPI : null;
@@ -19,6 +21,13 @@ function NavButton({ active, label, onClick, children }) {
 }
 
 export default function AppShell({ active = 'chat', title = 'PROXY', onClose, children }) {
+  const { loading, signedIn, displayName, avatarUrl } = useMyProfile();
+  const accountLabel = signedIn
+    ? displayName || 'Account'
+    : loading
+      ? 'Account'
+      : 'Sign in';
+
   const openChat = () => {
     if (active !== 'chat') api?.toggleBubble?.();
   };
@@ -61,15 +70,24 @@ export default function AppShell({ active = 'chat', title = 'PROXY', onClose, ch
         <div className="app-rail-footer">
           <button
             type="button"
-            className="app-rail-avatar"
-            aria-label="Account"
-            title="Account"
+            className="app-rail-account"
+            aria-label={accountLabel}
+            title={accountLabel}
             onClick={() => api?.openSubscriptionWindow?.()}
           >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-              <circle cx="12" cy="8" r="3.5" />
-              <path d="M5 21a7 7 0 0 1 14 0" />
-            </svg>
+            {signedIn ? (
+              <AccountAvatar name={displayName || 'Account'} src={avatarUrl} size={36} />
+            ) : (
+              <span className="app-rail-avatar-placeholder" aria-hidden>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="12" cy="8" r="3.5" />
+                  <path d="M5 21a7 7 0 0 1 14 0" />
+                </svg>
+              </span>
+            )}
+            <span className="app-rail-account-name">
+              {loading && !signedIn ? '…' : signedIn ? displayName || 'Account' : 'Sign in'}
+            </span>
           </button>
         </div>
       </nav>

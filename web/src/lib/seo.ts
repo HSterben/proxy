@@ -59,7 +59,7 @@ export const PAGE_META: Record<string, PageMeta> = {
   '/privacy': {
     title: `Privacy Policy, PROXY`,
     description:
-      'PROXY privacy policy: account and identity data, prompts and AI processing, usage metrics, Convex, WorkOS, AI providers, Stripe billing, retention, security, and your rights.',
+      'PROXY privacy policy: account data, chat prompts and attachments, microphone dictation, usage metrics, Convex, WorkOS, AI and speech providers, Stripe billing, retention, security, and your rights.',
     path: '/privacy',
     index: true,
   },
