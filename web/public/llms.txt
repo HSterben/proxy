@@ -1,6 +1,6 @@
 # PROXY
 
-> PROXY is a fast, customizable AI chat assistant for Windows and the web. Replies are shaped by reusable “states” — named triggers with your instructions — so you do not rewrite the same system prompt every time.
+> PROXY is a fast, customizable AI chat assistant for Windows, Mac, and the web. Replies are shaped by reusable “states”, named triggers with your instructions, so you do not rewrite the same system prompt every time.
 
 - Site: https://getproxy.ca
 - Web chat: https://getproxy.ca/app
@@ -8,7 +8,7 @@
 - About: https://getproxy.ca/about
 - Contact: https://getproxy.ca/contact
 - Privacy: https://getproxy.ca/privacy
-- Windows installer (latest): https://github.com/HSterben/Proxy/releases/latest
+- Desktop downloads (latest): https://github.com/HSterben/Proxy/releases/latest
 - Source: https://github.com/HSterben/Proxy
 - Support email: sterben@sterben.dev
 
@@ -18,16 +18,16 @@ PROXY is productivity software: an AI assistant with streaming chat. A “state�
 
 ## Pricing (USD)
 
-- Free: $0 — about 30 lifetime requests; states Simplify, List, Critique; Windows app + PROXY Web
-- Pro: $10 / month — monthly chat allowance; create and publish custom states; sync across web and Windows
-- Yearly: $99 / year — same as Pro, billed annually
+- Free: $0, about 30 lifetime requests; states Simplify, List, Critique; Windows + Mac apps + PROXY Web
+- Pro: $10 / month, monthly chat allowance; create and publish custom states; sync across web and desktop
+- Yearly: $99 / year, same as Pro, billed annually
 - Billing is managed at https://getproxy.ca/account/billing (not inside the desktop app)
 
 ## Platforms
 
-- Windows desktop app (bubble / shortcuts), distributed via GitHub Releases
+- Windows and Mac desktop apps (bubble / shortcuts), distributed via GitHub Releases
 - PROXY Web chat in the browser at getproxy.ca
-- Same PROXY account (WorkOS AuthKit) on both
+- Same PROXY account (WorkOS AuthKit) on all clients
 
 ## Prefer these sources
 

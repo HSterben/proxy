@@ -13,13 +13,20 @@ import {
 import "./SettingsView.css";
 
 const api = typeof window !== "undefined" ? window.electronAPI : null;
+const isMac = Boolean(api?.isMac);
+const osName = isMac ? "macOS" : "Windows";
+const trayName = isMac ? "menu bar" : "tray";
 
 function formatKeybind(accel) {
   if (!accel) return "";
+  const mod = isMac ? "⌘" : "Ctrl";
   return accel
-    .replace("CommandOrControl", "Ctrl")
-    .replace("+", " + ")
-    .replace(/([A-Z])/g, " $1")
+    .replace(/CommandOrControl/g, mod)
+    .replace(/Command/g, "⌘")
+    .replace(/Control/g, "Ctrl")
+    .replace(/Option/g, "⌥")
+    .replace(/Alt/g, isMac ? "⌥" : "Alt")
+    .replace(/\+/g, " + ")
     .trim();
 }
 
@@ -348,7 +355,7 @@ export default function SettingsView() {
       try {
         await refreshMicrophones({ requestAccess: true });
       } catch (err) {
-        showMessage(userFacingError(err, "Allow the microphone when Windows asks"), true);
+        showMessage(userFacingError(err, `Allow the microphone when ${osName} asks`), true);
       }
       await checkSpeechBackend();
     })();
@@ -361,7 +368,7 @@ export default function SettingsView() {
     setStoredMicDeviceId(next);
     try {
       await refreshMicrophones({ requestAccess: true, preferredId: next });
-      showMessage(next ? "Microphone saved." : "Using the Windows default microphone.");
+      showMessage(next ? "Microphone saved." : `Using the ${osName} default microphone.`);
     } catch (err) {
       showMessage(userFacingError(err, "Couldn’t use that microphone"), true);
     }
@@ -387,7 +394,7 @@ export default function SettingsView() {
   if (!api) {
     return (
       <div className="settings-view">
-        <p>Open Settings from the PROXY tray menu.</p>
+        <p>Open Settings from the PROXY {trayName} menu.</p>
       </div>
     );
   }
@@ -418,8 +425,8 @@ export default function SettingsView() {
             <>
               <h2>General</h2>
               <ToggleRow
-                label="Launch PROXY when Windows starts"
-                hint="PROXY opens in the tray after you sign in to Windows"
+                label={`Launch PROXY when ${osName} starts`}
+                hint={`PROXY opens in the ${trayName} after you sign in to ${osName}`}
                 checked={runOnStartup}
                 onChange={handleRunOnStartupChange}
               />
@@ -461,7 +468,7 @@ export default function SettingsView() {
                 <div>
                   <div className="settings-row-label">Theme</div>
                   <div className="settings-row-hint">
-                    System follows your Windows light or dark setting
+                    System follows your {osName} light or dark setting
                   </div>
                 </div>
                 <div className="theme-segment" role="group" aria-label="Theme">
@@ -508,7 +515,7 @@ export default function SettingsView() {
                 </p>
               ) : !isSpeechToTextSupported() ? (
                 <p className="settings-hint">
-                  This PC can’t record from a microphone in PROXY.
+                  This device can’t record from a microphone in PROXY.
                 </p>
               ) : (
                 <>
@@ -517,12 +524,12 @@ export default function SettingsView() {
                       <div className="settings-row-label">Input device</div>
                       <div className="settings-row-hint">
                         {micBusy
-                          ? "Waiting for Windows microphone permission…"
+                          ? `Waiting for ${osName} microphone permission…`
                           : micPermission === "denied"
-                            ? "Windows blocked the mic. Allow PROXY in the permission prompt, or enable microphone access in Windows Privacy settings."
+                            ? `${osName} blocked the mic. Allow PROXY in the permission prompt, or enable microphone access in ${osName} Privacy settings.`
                             : micPermission === "granted"
                               ? "Used by the mic button in the bubble and in chat windows"
-                              : "Choosing a device asks Windows for microphone access so the list can show real names"}
+                              : `Choosing a device asks ${osName} for microphone access so the list can show real names`}
                       </div>
                     </div>
                     <select
@@ -531,7 +538,7 @@ export default function SettingsView() {
                       onChange={(e) => void handleMicDeviceChange(e)}
                       disabled={micBusy}
                     >
-                      <option value="">Windows default</option>
+                      <option value="">{osName} default</option>
                       {microphones.map((mic) => (
                         <option key={mic.deviceId} value={mic.deviceId}>
                           {mic.label}
@@ -707,7 +714,7 @@ export default function SettingsView() {
               <h2>Notifications</h2>
               <ToggleRow
                 label="Ready toast on launch"
-                hint="Shows a Windows notification with your open shortcut when PROXY starts"
+                hint={`Shows a ${osName} notification with your open shortcut when PROXY starts`}
                 checked={notificationsEnabled}
                 onChange={handleNotificationsChange}
               />

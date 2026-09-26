@@ -24,7 +24,7 @@ export const footerLinks = [
 ] as const
 
 export const proofItems = [
-  'Windows app',
+  'Windows & Mac apps',
   'Web client',
   'Custom states',
   'Speech-to-text',
@@ -36,7 +36,7 @@ export const processSteps = [
     step: '01',
     title: 'Open PROXY',
     description:
-      'Install the Windows app from GitHub Releases, or open PROXY Web in your browser. Sign in with your PROXY account.',
+      'Install the Windows or Mac app from GitHub Releases, or open PROXY Web in your browser. Sign in with your PROXY account.',
   },
   {
     step: '02',
@@ -62,7 +62,7 @@ export const pricingPlans = [
     features: [
       'Up to about 30 requests (lifetime)',
       'Access official states (activate up to 3 at a time)',
-      'Windows app and PROXY Web chat',
+      'Windows, Mac, and PROXY Web chat',
       'Speech-to-text dictation',
       'Browse the states gallery',
     ],
@@ -81,7 +81,7 @@ export const pricingPlans = [
       'Monthly chat allowance',
       'Create and publish custom states',
       'Unlimited active states',
-      'States sync across web and Windows',
+      'States sync across web, Windows, and Mac',
       'Speech-to-text dictation',
       'Billing and invoices on this site',
     ],
@@ -114,7 +114,7 @@ export const faqs = [
   {
     question: 'What is PROXY?',
     answer:
-      'PROXY is a fast, customizable AI chat assistant for Windows and the web. You shape replies with reusable “states”, named triggers that carry instructions, so you are not rewriting the same system prompt every time. You can type or dictate with speech-to-text.',
+      'PROXY is a fast, customizable AI chat assistant for Windows, Mac, and the web. You shape replies with reusable “states”, named triggers that carry instructions, so you are not rewriting the same system prompt every time. You can type or dictate with speech-to-text.',
   },
   {
     question: 'What is a PROXY state?',
@@ -124,22 +124,22 @@ export const faqs = [
   {
     question: 'What differentiates PROXY from other AI chatbots?',
     answer:
-      'PROXY centers on reusable states you activate by name, so replies follow the instructions you need. One account works in the Windows app and in the browser. You can use official or community states, or create and share your own with Pro.',
+      'PROXY centers on reusable states you activate by name, so replies follow the instructions you need. One account works in the desktop apps and in the browser. You can use official or community states, or create and share your own with Pro.',
   },
   {
     question: 'Where can I use PROXY?',
     answer:
-      'On the Windows desktop app (including the global shortcut bubble) and in PROXY Web at getproxy.ca. Sign in with the same PROXY account on both so states and plan access stay in sync.',
+      'On the Windows and Mac desktop apps (including the global shortcut bubble) and in PROXY Web at getproxy.ca. Sign in with the same PROXY account so states and plan access stay in sync.',
   },
   {
     question: 'Can I speak instead of typing?',
     answer:
-      'Yes. On Windows and PROXY Web, tap the microphone to record, then tap again to transcribe. Pick a mic in Settings (desktop) or the mic menu (web), that request is what prompts OS/browser permission. Audio is sent securely to PROXY’s speech provider (Whisper) for transcription and is not kept as a chat recording.',
+      'Yes. On desktop and PROXY Web, tap the microphone to record, then tap again to transcribe. Pick a mic in Settings (desktop) or the mic menu (web); that request is what prompts OS/browser permission. Audio is sent securely to PROXY’s speech provider (Whisper) for transcription and is not kept as a chat recording.',
   },
   {
-    question: 'How do I get the Windows app?',
+    question: 'How do I get the desktop apps?',
     answer:
-      'Use any Download for Windows button on getproxy.ca. It downloads the latest PROXY-Setup installer from GitHub Releases. You can also open the Releases page to pick an older build.',
+      'Use Download for Windows or Download for Mac on getproxy.ca. Windows installs from the latest PROXY-Windows-Setup.exe. Mac downloads the latest .dmg (or .zip) from GitHub Releases. You can also open the Releases page to pick an older build. On Mac, the first open may need Control-click → Open if the build is not yet notarized.',
   },
   {
     question: 'How much does PROXY cost?',
@@ -159,7 +159,7 @@ export const faqs = [
   {
     question: 'Who makes PROXY?',
     answer:
-      'PROXY is built by Sterben. Support and contact: sterben@sterben.dev. The Windows app source and releases live on GitHub at HSterben/Proxy.',
+      'PROXY is built by Sterben. Support and contact: sterben@sterben.dev. Desktop app source and releases live on GitHub at HSterben/Proxy.',
   },
 ]
 
@@ -168,7 +168,7 @@ export const socialLinks = [
   { label: 'LinkedIn', href: 'https://www.linkedin.com/in/hsterben/' },
 ]
 
-/** Public GitHub repo used for Windows installs + desktop auto-updates. */
+/** Public GitHub repo used for desktop installs + auto-updates. */
 export const DESKTOP_GITHUB_REPO = 'HSterben/proxy'
 
 /**
@@ -179,9 +179,16 @@ export const DESKTOP_GITHUB_REPO = 'HSterben/proxy'
  */
 export const DESKTOP_INSTALLER_FILENAME = 'PROXY-Windows-Setup.exe'
 
+/** Prefer a stable DMG name when publishing Mac builds (rename in the release if Forge versions it). */
+export const DESKTOP_MAC_INSTALLER_FILENAME = 'PROXY-macOS.dmg'
+
 /** Starts a download of the newest Windows installer from GitHub Releases. */
 export const DESKTOP_DOWNLOAD_URL =
   `https://github.com/${DESKTOP_GITHUB_REPO}/releases/latest/download/${DESKTOP_INSTALLER_FILENAME}`
+
+/** Starts a download of the newest Mac DMG from GitHub Releases. */
+export const DESKTOP_MAC_DOWNLOAD_URL =
+  `https://github.com/${DESKTOP_GITHUB_REPO}/releases/latest/download/${DESKTOP_MAC_INSTALLER_FILENAME}`
 
 /** Release notes / assets list (not a direct file download). */
 export const DESKTOP_RELEASES_URL =

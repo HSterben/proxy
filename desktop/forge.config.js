@@ -2,17 +2,83 @@ const { FusesPlugin } = require("@electron-forge/plugin-fuses");
 const { FuseV1Options, FuseVersion } = require("@electron/fuses");
 
 const path = require("path");
+const fs = require("fs");
+const { execFileSync } = require("child_process");
+
+const iconBase = path.join(__dirname, "assets", "icons", "Proxy-Icon-Light");
+
+function generateMsixManifest() {
+  execFileSync(process.execPath, [path.join(__dirname, "scripts", "generate-msix-manifest.mjs")], {
+    cwd: __dirname,
+    stdio: "inherit",
+    env: process.env,
+  });
+  const manifestPath = path.join(__dirname, "assets", "msix", "AppxManifest.xml");
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error("MSIX AppxManifest.xml was not generated");
+  }
+  return manifestPath;
+}
+
+const osxSign =
+  process.env.APPLE_IDENTITY || process.env.CSC_NAME
+    ? {
+        identity: process.env.APPLE_IDENTITY || process.env.CSC_NAME,
+        "hardened-runtime": true,
+        entitlements: path.join(__dirname, "build", "entitlements.mac.plist"),
+        "entitlements-inherit": path.join(
+          __dirname,
+          "build",
+          "entitlements.mac.plist",
+        ),
+        "signature-flags": "library",
+      }
+    : undefined;
+
+const osxNotarize =
+  process.env.APPLE_ID &&
+  process.env.APPLE_APP_SPECIFIC_PASSWORD &&
+  process.env.APPLE_TEAM_ID
+    ? {
+        appleId: process.env.APPLE_ID,
+        appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+        teamId: process.env.APPLE_TEAM_ID,
+      }
+    : undefined;
 
 module.exports = {
   packagerConfig: {
     asar: true,
     name: "PROXY",
     executableName: "proxy",
-    icon: path.join(__dirname, "..", "backend", "public", "Proxy-Icon-Light"), // .ico on Windows
+    appBundleId: "com.getproxy.PROXY",
+    appCategoryType: "public.app-category.productivity",
+    icon: iconBase,
+    // Windows unpackaged / Squirrel; MSIX also declares proxy:// in AppxManifest.
+    protocols: [
+      {
+        name: "PROXY Auth",
+        schemes: ["proxy"],
+      },
+    ],
     extraResource: [
       path.join(__dirname, "proxy-presets.json"),
-      path.join(__dirname, "..", "backend", "public", "Proxy-Icon-Light.ico"),
+      path.join(__dirname, "assets", "icons", "Proxy-Icon-Light.ico"),
+      path.join(__dirname, "assets", "icons", "Proxy-Icon-Light.png"),
+      path.join(__dirname, "assets", "icons", "Proxy-Icon-Light.icns"),
     ],
+    extendInfo: {
+      NSMicrophoneUsageDescription:
+        "PROXY uses the microphone for speech-to-text dictation in chat.",
+      CFBundleURLTypes: [
+        {
+          CFBundleURLName: "PROXY Auth",
+          CFBundleURLSchemes: ["proxy"],
+        },
+      ],
+    },
+    ...(osxSign ? { osxSign } : {}),
+    ...(osxNotarize ? { osxNotarize } : {}),
   },
   rebuildConfig: {},
   makers: [
@@ -20,27 +86,14 @@ module.exports = {
       name: "@electron-forge/maker-msix",
       config: {
         logLevel: "warn",
+        appManifest: generateMsixManifest(),
+        packageAssets: path.join(__dirname, "assets", "msix"),
 
         windowsKitVersion: process.env.WINDOWS_KIT_VERSION || "10.0.28000.0",
 
         ...(process.env.WINDOWS_KIT_PATH
           ? { windowsKitPath: process.env.WINDOWS_KIT_PATH }
           : {}),
-
-        packageAssets: path.join(__dirname, "assets", "msix"),
-
-        manifestVariables: {
-          publisher: process.env.MSIX_PUBLISHER,
-          publisherDisplayName: process.env.MSIX_PUBLISHER_DISPLAY_NAME,
-          packageIdentity: process.env.MSIX_PACKAGE_IDENTITY,
-
-          packageDisplayName: "PROXY AI",
-          appDisplayName: "PROXY AI",
-          packageDescription: "PROXY AI - chat assistant",
-
-          packageMinOSVersion: "10.0.19041.0",
-          packageMaxOSVersionTested: "10.0.28000.0",
-        },
 
         ...(process.env.CERT_FILE && {
           windowsSignOptions: {
@@ -54,6 +107,16 @@ module.exports = {
     {
       name: "@electron-forge/maker-zip",
       platforms: ["win32"],
+    },
+    {
+      name: "@electron-forge/maker-dmg",
+      config: {
+        name: "PROXY",
+        title: "PROXY",
+        icon: `${iconBase}.icns`,
+        format: "ULFO",
+      },
+      platforms: ["darwin"],
     },
     {
       name: "@electron-forge/maker-zip",
@@ -88,11 +151,8 @@ module.exports = {
     {
       name: "@electron-forge/plugin-vite",
       config: {
-        // `build` can specify multiple entry builds, which can be Main process, Preload scripts, Worker process, etc.
-        // If you are familiar with Vite configuration, it will look really familiar.
         build: [
           {
-            // `entry` is just an alias for `build.lib.entry` in the corresponding file of `config`.
             entry: "src/main.js",
             config: "vite.main.config.mjs",
             target: "main",
@@ -119,8 +179,6 @@ module.exports = {
         ],
       },
     },
-    // Fuses are used to enable/disable various Electron functionality
-    // at package time, before code signing the application
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,

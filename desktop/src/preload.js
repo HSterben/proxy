@@ -3,7 +3,14 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+const platform = process.platform;
+
 contextBridge.exposeInMainWorld('electronAPI', {
+  platform,
+  isMac: platform === 'darwin',
+  isWindows: platform === 'win32',
+  getPlatform: () => ipcRenderer.invoke('get-platform'),
+
   // Existing message APIs
   sendMessage: (payload) => ipcRenderer.invoke('send-message', payload),
   getPendingChatStart: () => ipcRenderer.invoke('get-pending-chat-start'),

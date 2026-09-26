@@ -1,7 +1,7 @@
 import Button from '../ui/Button'
 import Reveal from '../ui/Reveal'
 import Sparkline from '../ui/Sparkline'
-import { DESKTOP_DOWNLOAD_URL } from '../../data/content'
+import { DESKTOP_DOWNLOAD_URL, DESKTOP_MAC_DOWNLOAD_URL } from '../../data/content'
 
 export default function CTABanner() {
   return (
@@ -16,21 +16,25 @@ export default function CTABanner() {
             <div className="relative">
               <p className="text-center text-[11px] font-medium uppercase tracking-[0.2em] text-white/42">
                 Web <span className="mx-1.5 inline-block h-1 w-1 rounded-full bg-signal align-middle" /> Windows{' '}
+                <span className="mx-1.5 inline-block h-1 w-1 rounded-full bg-signal align-middle" /> Mac{' '}
                 <span className="mx-1.5 inline-block h-1 w-1 rounded-full bg-signal align-middle" /> States
               </p>
               <h2 className="display mx-auto mt-5 max-w-2xl text-center font-semibold">
-                Open PROXY in the browser or install on Windows
+                Open PROXY in the browser or install on your desktop
               </h2>
-              <p className="mx-auto mt-4 max-w-[40ch] text-center text-lg leading-relaxed text-white/52">
-                Sign in to chat with an active plan. Download the latest Windows installer from GitHub
+              <p className="mx-auto mt-4 max-w-[42ch] text-center text-lg leading-relaxed text-white/52">
+                Sign in to chat with an active plan. Download the latest Windows or Mac build from GitHub
                 Releases.
               </p>
-              <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
+              <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
                 <Button href="/app" variant="primary-light" className="w-full sm:w-auto">
                   Open PROXY Web
                 </Button>
                 <Button href={DESKTOP_DOWNLOAD_URL} variant="outline-light" className="w-full sm:w-auto">
                   Download for Windows
+                </Button>
+                <Button href={DESKTOP_MAC_DOWNLOAD_URL} variant="outline-light" className="w-full sm:w-auto">
+                  Download for Mac
                 </Button>
               </div>
               <Sparkline className="mx-auto mt-12 h-16 w-full max-w-xl opacity-70" />

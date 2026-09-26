@@ -3,7 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowUpRight, Menu, X } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ScrollSmoother } from 'gsap/ScrollSmoother'
-import { DESKTOP_DOWNLOAD_URL, navLinks } from '../../data/content'
+import { DESKTOP_DOWNLOAD_URL, DESKTOP_MAC_DOWNLOAD_URL, navLinks } from '../../data/content'
 import { smoothScrollTo } from '../../lib/smoothScroll'
 import BrandMark from '../ui/BrandMark'
 import AccountMenu from './AccountMenu'
@@ -163,9 +163,18 @@ export default function Navbar() {
             href={DESKTOP_DOWNLOAD_URL}
             target="_blank"
             rel="noreferrer"
-            className={`pressable inline-flex min-h-10 items-center gap-1.5 rounded-full border px-4 text-[15px] font-medium tracking-[-0.01em] ${ctaIdle}`}
+            className={`pressable inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 text-[14px] font-medium tracking-[-0.01em] ${ctaIdle}`}
           >
-            Download for Windows
+            Windows
+            <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={1.5} />
+          </a>
+          <a
+            href={DESKTOP_MAC_DOWNLOAD_URL}
+            target="_blank"
+            rel="noreferrer"
+            className={`pressable inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 text-[14px] font-medium tracking-[-0.01em] ${ctaIdle}`}
+          >
+            Mac
             <ArrowUpRight className="h-3.5 w-3.5" strokeWidth={1.5} />
           </a>
           <Link
@@ -227,6 +236,16 @@ export default function Navbar() {
                 }`}
               >
                 Download for Windows
+              </a>
+              <a
+                href={DESKTOP_MAC_DOWNLOAD_URL}
+                target="_blank"
+                rel="noreferrer"
+                className={`pressable flex min-h-11 items-center justify-center rounded-[12px] border text-base ${
+                  inverted ? 'border-light/18 text-light' : 'border-hairline text-ink'
+                }`}
+              >
+                Download for Mac
               </a>
               <div className="mt-3 px-1">
                 <AccountMenu variant={inverted ? 'dark' : 'light'} />

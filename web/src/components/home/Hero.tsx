@@ -1,7 +1,7 @@
 import { ArrowUpRight, Sparkles } from 'lucide-react'
 import { motion, useReducedMotion } from 'framer-motion'
 import Orb from '../Orb'
-import { DESKTOP_DOWNLOAD_URL } from '../../data/content'
+import { DESKTOP_DOWNLOAD_URL, DESKTOP_MAC_DOWNLOAD_URL, DESKTOP_RELEASES_URL } from '../../data/content'
 import { productImages } from '../../data/productImages'
 import { smoothScrollTo } from '../../lib/smoothScroll'
 
@@ -40,7 +40,7 @@ export default function Hero() {
               you control.
             </h1>
             <p className="mt-4 max-w-[28ch] text-[15px] leading-snug text-muted-dark md:text-base">
-              Windows and the web. One account. Named triggers that shape every reply.
+              Windows, Mac, and the web. One account. Named triggers that shape every reply.
             </p>
           </motion.div>
 
@@ -49,18 +49,18 @@ export default function Hero() {
             {...enter(0.05)}
           >
             <a
-              href={DESKTOP_DOWNLOAD_URL}
+              href={DESKTOP_RELEASES_URL}
               target="_blank"
               rel="noreferrer"
               className="pressable group flex h-full w-full flex-col justify-between p-5 lg:p-6"
-              aria-label="Download Windows app"
+              aria-label="Download desktop apps"
             >
               <ArrowUpRight
                 className="h-7 w-7 self-end transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
                 strokeWidth={1.4}
               />
               <div>
-                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-ink/45">Windows</p>
+                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-ink/45">Windows · Mac</p>
                 <p className="mt-2 text-[1.35rem] font-semibold leading-tight tracking-[-0.025em] lg:text-[1.5rem]">
                   Download
                   <br />
@@ -129,23 +129,18 @@ export default function Hero() {
               href={DESKTOP_DOWNLOAD_URL}
               target="_blank"
               rel="noreferrer"
-              className="pressable hero-radius hero-material flex min-h-11 flex-1 flex-col justify-between bg-paper p-5 text-ink"
-              aria-label="Download Windows app"
+              className="pressable hero-radius hero-material flex min-h-11 flex-1 items-center justify-center gap-1.5 bg-paper p-4 text-[14px] font-semibold tracking-[-0.015em] text-ink"
             >
-              <ArrowUpRight className="h-5 w-5 self-end" strokeWidth={1.5} />
-              <span className="text-[15px] font-semibold leading-snug tracking-[-0.02em]">
-                Download
-                <br />
-                the app
-              </span>
+              Windows
+              <ArrowUpRight className="h-4 w-4" />
             </a>
             <a
-              href={DESKTOP_DOWNLOAD_URL}
+              href={DESKTOP_MAC_DOWNLOAD_URL}
               target="_blank"
               rel="noreferrer"
-              className="pressable hero-radius hero-material flex min-h-11 flex-[2] items-center justify-center gap-2 bg-paper p-5 text-[15px] font-semibold tracking-[-0.015em] text-ink"
+              className="pressable hero-radius hero-material flex min-h-11 flex-1 items-center justify-center gap-1.5 bg-paper p-4 text-[14px] font-semibold tracking-[-0.015em] text-ink"
             >
-              Download for Windows
+              Mac
               <ArrowUpRight className="h-4 w-4" />
             </a>
           </motion.div>

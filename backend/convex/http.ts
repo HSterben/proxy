@@ -30,17 +30,41 @@ function desktopAuthHtml(opts: {
   title: string;
   body: string;
   deepLink?: string;
+  loopbackUrl?: string;
   isError?: boolean;
 }) {
-  const deepLink = opts.deepLink
-    ? `<script>
-  try { window.location.href = ${JSON.stringify(opts.deepLink)}; } catch (e) {}
-  setTimeout(function () {
+  const deliverScript =
+    opts.deepLink || opts.loopbackUrl
+      ? `<script>
+(function () {
+  var deep = ${JSON.stringify(opts.deepLink || '')};
+  var loop = ${JSON.stringify(opts.loopbackUrl || '')};
+  function showFallback() {
     var el = document.getElementById('fallback');
     if (el) el.style.display = 'block';
-  }, 800);
+  }
+  function tryLoopback() {
+    if (!loop) return Promise.resolve();
+    return fetch(loop, { mode: 'cors', credentials: 'omit', cache: 'no-store' })
+      .catch(function () {
+        // Image/beacon fallback if fetch is blocked
+        return new Promise(function (resolve) {
+          var img = new Image();
+          img.onload = img.onerror = function () { resolve(); };
+          img.src = loop + (loop.indexOf('?') >= 0 ? '&' : '?') + 'beacon=1';
+          setTimeout(resolve, 400);
+        });
+      });
+  }
+  tryLoopback().finally(function () {
+    if (deep) {
+      try { window.location.href = deep; } catch (e) {}
+    }
+    setTimeout(showFallback, 900);
+  });
+})();
 </script>`
-    : '';
+      : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -60,9 +84,9 @@ function desktopAuthHtml(opts: {
 <body>
   <h1 class="${opts.isError ? 'err' : 'ok'}">${opts.title}</h1>
   <p>${opts.body}</p>
-  ${deepLink}
+  ${deliverScript}
   <div id="fallback">
-    <p>If the PROXY app did not open automatically, return to the app and try Sign in again.</p>
+    <p>If the PROXY app did not open automatically, click below, then return to PROXY.</p>
     ${
       opts.deepLink
         ? `<p><a class="btn" href="${opts.deepLink}">Open PROXY</a></p>`
@@ -71,6 +95,36 @@ function desktopAuthHtml(opts: {
   </div>
 </body>
 </html>`;
+}
+
+function parseDesktopOAuthState(raw: string | null): {
+  isWeb: boolean;
+  loopback: string | null;
+} {
+  const state = raw || 'desktop';
+  if (state === 'web' || state.startsWith('web~')) {
+    return { isWeb: true, loopback: null };
+  }
+  // desktop~127.0.0.1:PORT (loopback auth fallback for Store/MSIX)
+  if (state.startsWith('desktop~')) {
+    const loopback = state.slice('desktop~'.length).trim();
+    if (/^127\.0\.0\.1:\d{2,5}$/.test(loopback)) {
+      return { isWeb: false, loopback };
+    }
+  }
+  return { isWeb: false, loopback: null };
+}
+
+function desktopLoopbackDeliveryUrl(
+  loopback: string | null,
+  params: Record<string, string>
+): string | undefined {
+  if (!loopback) return undefined;
+  const u = new URL(`http://${loopback}/auth/desktop`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v) u.searchParams.set(k, v);
+  }
+  return u.toString();
 }
 
 async function syncEntitlementsForWorkos(
@@ -258,12 +312,22 @@ const WORKOS_REDIRECT_URI = (
 
 // Start OAuth flow - redirects to WorkOS
 // ?state=web → callback returns to PROXY_WEBSITE_URL (browser). Default → Electron (proxy://).
+// ?loopback=127.0.0.1:PORT → encoded into OAuth state so callback can deliver tokens to the app.
 http.route({
   path: '/auth/login',
   method: 'GET',
   handler: httpAction(async (_, req) => {
     const loginUrl = new URL(req.url);
-    const state = loginUrl.searchParams.get('state') || 'desktop';
+    const stateParam = loginUrl.searchParams.get('state') || 'desktop';
+    const loopback = loginUrl.searchParams.get('loopback');
+    let state = stateParam;
+    if (
+      stateParam === 'desktop' &&
+      loopback &&
+      /^127\.0\.0\.1:\d{2,5}$/.test(loopback)
+    ) {
+      state = `desktop~${loopback}`;
+    }
 
     const authUrl = new URL('https://api.workos.com/user_management/authorize');
     authUrl.searchParams.set('client_id', WORKOS_CLIENT_ID);
@@ -289,8 +353,7 @@ http.route({
     const url = new URL(req.url);
     const code = url.searchParams.get('code');
     const error = url.searchParams.get('error');
-    const state = url.searchParams.get('state') || 'desktop';
-    const isWeb = state === 'web';
+    const { isWeb, loopback } = parseDesktopOAuthState(url.searchParams.get('state'));
     const webBase = safeWebsiteBase();
 
     // Ignore leftover redirects that already carried tokens/errors (prevents loops)
@@ -317,6 +380,7 @@ http.route({
           title: 'Sign-in failed',
           body: `WorkOS returned an error: ${error}`,
           deepLink: `proxy://auth/error?message=${encodeURIComponent(error)}`,
+          loopbackUrl: desktopLoopbackDeliveryUrl(loopback, { error }),
           isError: true,
         }),
         400
@@ -338,6 +402,9 @@ http.route({
           title: 'Sign-in incomplete',
           body: 'No authorization code was returned. Close this tab, return to PROXY, and try Sign in again.',
           deepLink: 'proxy://auth/error?message=No%20code%20provided',
+          loopbackUrl: desktopLoopbackDeliveryUrl(loopback, {
+            error: 'No code provided',
+          }),
           isError: true,
         }),
         400
@@ -378,6 +445,9 @@ http.route({
             title: 'Sign-in failed',
             body: 'Could not exchange the login code for a session. Check WORKOS_API_KEY on this Convex deployment, then try again from the app.',
             deepLink: `proxy://auth/error?message=${encodeURIComponent('Authentication failed')}`,
+            loopbackUrl: desktopLoopbackDeliveryUrl(loopback, {
+              error: 'Authentication failed',
+            }),
             isError: true,
           }),
           400
@@ -412,13 +482,18 @@ http.route({
         });
       }
 
-      // Prefer HTML + JS deep link over HTTP 302 to proxy:// (browsers often mishandle custom-protocol redirects → login loops)
+      // Prefer HTML + JS deep link over HTTP 302 to proxy:// (browsers often mishandle custom-protocol redirects → login loops).
+      // Also deliver via localhost loopback when the desktop app started one (Store/MSIX-safe).
       const deepLink = `proxy://auth/success?token=${encodeURIComponent(tokenData.access_token)}&refresh=${encodeURIComponent(tokenData.refresh_token || '')}`;
       return htmlResponse(
         desktopAuthHtml({
           title: 'Signed in',
           body: 'Returning you to the PROXY app. You can close this tab.',
           deepLink,
+          loopbackUrl: desktopLoopbackDeliveryUrl(loopback, {
+            token: tokenData.access_token,
+            refresh: tokenData.refresh_token || '',
+          }),
         })
       );
     } catch (err) {
@@ -436,6 +511,9 @@ http.route({
           title: 'Sign-in failed',
           body: 'An unexpected error occurred during sign-in. Close this tab and try again from PROXY.',
           deepLink: 'proxy://auth/error?message=Authentication%20failed',
+          loopbackUrl: desktopLoopbackDeliveryUrl(loopback, {
+            error: 'Authentication failed',
+          }),
           isError: true,
         }),
         500

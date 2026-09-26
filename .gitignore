@@ -404,6 +404,9 @@ patches/mtime-cache.json
 
 API_DOCUMENTATION.md
 
+# Generated MSIX manifest (filled at make time from AppxManifest.xml.in)
+desktop/assets/msix/AppxManifest.xml
+
 # Hold mobile until desktop/web has subscriptions - do not push
 mobile/
 

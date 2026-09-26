@@ -1,5 +1,6 @@
 export default function WindowControls({ onClose }) {
   const api = typeof window !== 'undefined' ? window.electronAPI : null;
+  if (api?.isMac) return null;
 
   return (
     <div className="app-window-controls">

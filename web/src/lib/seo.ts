@@ -15,7 +15,7 @@ export const SITE_TAGLINE = 'Fast customizable AI assistance'
 export const SITE_TAGLINE_SECONDARY = 'Named triggers that shape every reply.'
 
 export const DEFAULT_DESCRIPTION =
-  'PROXY is a fast, customizable AI assistant for Windows and the web. Use named states, trigger words with your instructions, so every reply matches how you work. Free tier available; Pro from $10/month. Streaming chat, synced account, states gallery at getproxy.ca.'
+  'PROXY is a fast, customizable AI assistant for Windows, Mac, and the web. Use named states, trigger words with your instructions, so every reply matches how you work. Free tier available; Pro from $10/month. Streaming chat, synced account, states gallery at getproxy.ca.'
 
 export const DEFAULT_TITLE = `${SITE_NAME}, ${SITE_TAGLINE}`
 

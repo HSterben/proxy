@@ -119,6 +119,14 @@
   -webkit-app-region: drag;
 }
 
+html.platform-darwin .app-title-bar {
+  padding-left: 78px;
+}
+
+html.platform-darwin .chat-header {
+  padding-left: 78px;
+}
+
 .app-title-bar > .app-window-controls {
   height: 100%;
   align-self: stretch;

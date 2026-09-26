@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 
 const api = typeof window !== 'undefined' ? window.electronAPI : null;
 
+function applyPlatformClass() {
+  const platform = api?.platform || (typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? 'darwin' : '');
+  if (!platform) return;
+  document.documentElement.classList.add(`platform-${platform}`);
+  if (platform === 'darwin') document.documentElement.classList.add('platform-mac');
+}
+
 export function applyTheme(effective) {
   const theme = effective === 'light' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', theme);
@@ -9,6 +16,7 @@ export function applyTheme(effective) {
 }
 
 export async function initTheme() {
+  applyPlatformClass();
   if (!api?.getTheme) {
     applyTheme('dark');
     return;

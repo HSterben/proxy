@@ -16,6 +16,7 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import http from "node:http";
 import started from "electron-squirrel-startup";
 import Store from "electron-store";
 import { updateElectronApp, UpdateSourceType, makeUserNotifier } from "update-electron-app";
@@ -108,22 +109,23 @@ const POSITION_OPTIONS = ["bottom-right", "bottom-left", "top-right", "top-left"
 const DEFAULT_KEYBIND = "CommandOrControl+Alt+I";
 const DEFAULT_VOICE_KEYBIND = "CommandOrControl+Alt+M";
 const MARGIN = 20;
+const IS_MAC = process.platform === "darwin";
+const IS_WIN = process.platform === "win32";
 
 // Windows toasts need a stable AppUserModelID (packaged + dev).
-if (process.platform === "win32") {
+if (IS_WIN) {
   app.setAppUserModelId("com.getproxy.PROXY");
 }
 
 function formatKeybindForHumans(accel) {
   const raw = String(accel || DEFAULT_KEYBIND);
-  const mod =
-    process.platform === "darwin" ? "⌘" : "Ctrl";
+  const mod = IS_MAC ? "⌘" : "Ctrl";
   return raw
     .replace(/CommandOrControl/g, mod)
     .replace(/Command/g, "⌘")
     .replace(/Control/g, "Ctrl")
     .replace(/Option/g, "⌥")
-    .replace(/Alt/g, "Alt")
+    .replace(/Alt/g, IS_MAC ? "⌥" : "Alt")
     .replace(/Shift/g, "Shift")
     .replace(/\+/g, "+");
 }
@@ -158,7 +160,8 @@ function showStartupReadyNotification() {
 
   const shortcut = formatKeybindForHumans(getActiveKeybind());
   const title = "PROXY is ready";
-  const body = `Press ${shortcut} anytime to open. PROXY stays in the system tray.`;
+  const trayLabel = IS_MAC ? "menu bar" : "system tray";
+  const body = `Press ${shortcut} anytime to open. PROXY stays in the ${trayLabel}.`;
 
   if (Notification.isSupported()) {
     try {
@@ -179,7 +182,7 @@ function showStartupReadyNotification() {
   }
 
   // Windows fallback when the Notification API is unavailable.
-  if (tray && process.platform === "win32") {
+  if (tray && IS_WIN) {
     try {
       tray.displayBalloon({
         title,
@@ -229,19 +232,99 @@ function getDefaultPresetsPath() {
   return path.join(app.getPath("userData"), "proxy-presets.json");
 }
 
-// Window icon: backend public asset (also copied via forge extraResource when packaged)
+// Window / tray icon: prefer PNG on macOS, ICO on Windows.
 function getIconPath() {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "Proxy-Icon-Light.ico");
+  const preferred = IS_MAC
+    ? ["Proxy-Icon-Light.png", "Proxy-Icon-Light.icns", "Proxy-Icon-Light.ico"]
+    : ["Proxy-Icon-Light.ico", "Proxy-Icon-Light.png"];
+  const dirs = app.isPackaged
+    ? [process.resourcesPath]
+    : [
+        path.join(CLIENT_ROOT, "assets", "icons"),
+        path.join(REPO_ROOT, "backend", "public"),
+        path.join(REPO_ROOT, "assets"),
+      ];
+  for (const dir of dirs) {
+    for (const name of preferred) {
+      const candidate = path.join(dir, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
   }
-  return path.join(CLIENT_ROOT, "..", "backend", "public", "Proxy-Icon-Light.ico");
+  return path.join(CLIENT_ROOT, "assets", "icons", preferred[0]);
+}
+
+/** Shared BrowserWindow chrome for document windows (chat, settings, …). */
+function documentWindowChrome() {
+  const windowIcon = getIconPath();
+  if (IS_MAC) {
+    return {
+      frame: false,
+      titleBarStyle: "hiddenInset",
+      trafficLightPosition: { x: 16, y: 16 },
+      icon: windowIcon,
+    };
+  }
+  return {
+    frame: false,
+    icon: windowIcon,
+  };
+}
+
+function createAppMenu() {
+  if (!IS_MAC) {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+  const template = [
+    {
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        {
+          label: "Settings…",
+          accelerator: "CmdOrCtrl+,",
+          click: () => createSettingsWindow(),
+        },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    { role: "editMenu" },
+    {
+      label: "View",
+      submenu: [
+        {
+          label: "Show/Hide Bubble",
+          accelerator: "CmdOrCtrl+Alt+I",
+          click: () => toggleWindow(),
+        },
+        {
+          label: "States",
+          click: () => createPresetsWindow(),
+        },
+        {
+          label: "Manage Subscription",
+          click: () => createSubscriptionWindow(),
+        },
+      ],
+    },
+    { role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function getPresetsPathsToTry() {
   const custom = configStore.get(PRESETS_PATH_KEY);
   if (custom) return [custom];
   const primary = getDefaultPresetsPath();
-  if (process.platform === "win32") {
+  if (IS_WIN) {
     const roaming = path.join(process.env.APPDATA || "", "proxy", "proxy-presets.json");
     if (roaming) return [roaming, primary];
   }
@@ -368,20 +451,199 @@ let isToggling = false;
 
 const AUTH_PROTOCOL = "proxy";
 
+/** @type {import('node:http').Server | null} */
+let authLoopbackServer = null;
+let authLoopbackPort = 0;
+let authLoopbackCloseTimer = null;
+
+function findAuthProtocolUrl(argv = []) {
+  for (const arg of argv) {
+    if (typeof arg !== "string") continue;
+    const trimmed = arg.trim().replace(/^"+|"+$/g, "");
+    if (trimmed.startsWith(`${AUTH_PROTOCOL}://`)) return trimmed;
+    // Some launchers wrap the URI as --url=proxy://...
+    const eq = trimmed.match(new RegExp(`^--?[^=]*=(${AUTH_PROTOCOL}://.*)$`, "i"));
+    if (eq?.[1]) return eq[1];
+  }
+  return null;
+}
+
 function isAuthProtocolUrl(arg) {
-  return typeof arg === "string" && arg.startsWith(`${AUTH_PROTOCOL}://`);
+  return typeof arg === "string" && arg.trim().replace(/^"+|"+$/g, "").startsWith(`${AUTH_PROTOCOL}://`);
 }
 
 function registerAuthProtocol() {
-  if (process.defaultApp) {
-    if (process.argv.length >= 2) {
-      app.setAsDefaultProtocolClient(AUTH_PROTOCOL, process.execPath, [
-        path.resolve(process.argv[1]),
-      ]);
+  try {
+    if (process.defaultApp) {
+      if (process.argv.length >= 2) {
+        app.setAsDefaultProtocolClient(AUTH_PROTOCOL, process.execPath, [
+          path.resolve(process.argv[1]),
+        ]);
+      }
+    } else {
+      app.setAsDefaultProtocolClient(AUTH_PROTOCOL);
     }
-  } else {
-    app.setAsDefaultProtocolClient(AUTH_PROTOCOL);
+  } catch (err) {
+    console.warn("[auth] setAsDefaultProtocolClient failed:", err);
   }
+}
+
+function bringAppToForeground() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+      mainWindow.setOpacity(1);
+    }
+    mainWindow.focus();
+  }
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    if (win !== mainWindow) {
+      try {
+        win.show();
+        win.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (IS_WIN && app.focus) {
+    try {
+      app.focus({ steal: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function applyAuthTokens(token, refresh) {
+  if (!token) return false;
+  store.set("accessToken", token);
+  if (refresh) store.set("refreshToken", refresh);
+
+  fetch(`${CONVEX_HTTP_URL}/auth/claim-signup`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  }).catch((err) => console.warn("[signup] claim-signup failed:", err));
+
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) win.webContents.send("auth-success", { token });
+  });
+  bringAppToForeground();
+  stopAuthLoopbackSoon();
+  return true;
+}
+
+function handleAuthCallback(url) {
+  try {
+    const parsedUrl = new URL(String(url).trim().replace(/^"+|"+$/g, ""));
+    // Custom protocol: proxy://auth/success → hostname + pathname
+    const fullPath = `${parsedUrl.hostname}${parsedUrl.pathname}`.replace(/\/+$/, "");
+
+    if (fullPath === "auth/success") {
+      const token = parsedUrl.searchParams.get("token");
+      const refresh = parsedUrl.searchParams.get("refresh");
+      if (!applyAuthTokens(token, refresh)) {
+        console.warn("[auth] success URL missing token");
+      }
+    } else if (fullPath === "auth/error") {
+      const message =
+        parsedUrl.searchParams.get("message") || "Authentication failed";
+      BrowserWindow.getAllWindows().forEach((win) => {
+        if (!win.isDestroyed()) win.webContents.send("auth-error", { message });
+      });
+      bringAppToForeground();
+      stopAuthLoopbackSoon();
+    }
+  } catch (err) {
+    console.error("Error handling auth callback:", err);
+  }
+}
+
+function stopAuthLoopbackSoon(delayMs = 2_000) {
+  if (authLoopbackCloseTimer) clearTimeout(authLoopbackCloseTimer);
+  authLoopbackCloseTimer = setTimeout(() => {
+    stopAuthLoopback();
+  }, delayMs);
+}
+
+function stopAuthLoopback() {
+  if (authLoopbackCloseTimer) {
+    clearTimeout(authLoopbackCloseTimer);
+    authLoopbackCloseTimer = null;
+  }
+  if (authLoopbackServer) {
+    try {
+      authLoopbackServer.close();
+    } catch {
+      /* ignore */
+    }
+    authLoopbackServer = null;
+    authLoopbackPort = 0;
+  }
+}
+
+/**
+ * Localhost receiver for browser auth when proxy:// is blocked (common on
+ * Store/MSIX until the package protocol is registered and trusted).
+ */
+function startAuthLoopback() {
+  stopAuthLoopback();
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      try {
+        const reqUrl = new URL(req.url || "/", "http://127.0.0.1");
+        if (reqUrl.pathname === "/auth/desktop" || reqUrl.pathname === "/auth/success") {
+          const token = reqUrl.searchParams.get("token");
+          const refresh = reqUrl.searchParams.get("refresh");
+          const error = reqUrl.searchParams.get("error") || reqUrl.searchParams.get("message");
+          if (token) {
+            applyAuthTokens(token, refresh);
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("ok");
+            return;
+          }
+          if (error) {
+            BrowserWindow.getAllWindows().forEach((win) => {
+              if (!win.isDestroyed()) win.webContents.send("auth-error", { message: error });
+            });
+            bringAppToForeground();
+            stopAuthLoopbackSoon();
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("error");
+            return;
+          }
+        }
+        res.writeHead(404);
+        res.end("not found");
+      } catch (err) {
+        console.warn("[auth] loopback request failed:", err);
+        res.writeHead(500);
+        res.end("error");
+      }
+    });
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      authLoopbackServer = server;
+      authLoopbackPort = typeof addr === "object" && addr ? addr.port : 0;
+      // Auto-close if the user abandons login.
+      authLoopbackCloseTimer = setTimeout(() => stopAuthLoopback(), 10 * 60 * 1000);
+      resolve(authLoopbackPort);
+    });
+  });
 }
 
 registerAuthProtocol();
@@ -391,16 +653,12 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
-  app.on("second-instance", (event, commandLine) => {
-    const url = commandLine.find((arg) => isAuthProtocolUrl(arg));
+  app.on("second-instance", (_event, commandLine) => {
+    const url = findAuthProtocolUrl(commandLine);
     if (url) {
       handleAuthCallback(url);
     }
-
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    bringAppToForeground();
   });
 }
 
@@ -408,48 +666,6 @@ app.on("open-url", (event, url) => {
   event.preventDefault();
   handleAuthCallback(url);
 });
-
-function handleAuthCallback(url) {
-  try {
-    const parsedUrl = new URL(url);
-    // Custom protocol: proxy://auth/success → hostname + pathname
-    const fullPath = parsedUrl.hostname + parsedUrl.pathname;
-
-    if (fullPath === "auth/success") {
-      const token = parsedUrl.searchParams.get("token");
-      const refresh = parsedUrl.searchParams.get("refresh");
-
-      if (token) {
-        store.set("accessToken", token);
-        if (refresh) {
-          store.set("refreshToken", refresh);
-        }
-
-        // Idempotent free-tier IP claim (also done in Convex /auth/callback).
-        fetch(`${CONVEX_HTTP_URL}/auth/claim-signup`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }).catch((err) => console.warn("[signup] claim-signup failed:", err));
-
-        BrowserWindow.getAllWindows().forEach((win) => {
-          win.webContents.send("auth-success", { token });
-        });
-      }
-    } else if (fullPath === "auth/error") {
-      const message =
-        parsedUrl.searchParams.get("message") || "Authentication failed";
-
-      BrowserWindow.getAllWindows().forEach((win) => {
-        win.webContents.send("auth-error", { message });
-      });
-    }
-  } catch (err) {
-    console.error("Error handling auth callback:", err);
-  }
-}
 
 // Fewer fade steps for snappier show/hide
 const fadeIn = (window, callback) => {
@@ -812,18 +1028,16 @@ function showChatWindow(input) {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
   const bounds = nextChatWindowBounds(workArea);
-  const windowIcon = getIconPath();
 
   const win = new BrowserWindow({
     ...bounds,
-    frame: false,
+    ...documentWindowChrome(),
     transparent: false,
     backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
     resizable: true,
     alwaysOnTop: false,
     skipTaskbar: false,
     show: false,
-    icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       nodeIntegration: false,
@@ -877,15 +1091,13 @@ function createSettingsWindow() {
     settingsWindow.focus();
     return;
   }
-  const windowIcon = getIconPath();
   settingsWindow = new BrowserWindow({
     width: 760,
     height: 620,
     show: false,
-    frame: false,
+    ...documentWindowChrome(),
     title: "PROXY Settings",
     backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
-    icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
@@ -909,15 +1121,13 @@ function createSubscriptionWindow() {
     subscriptionWindow.focus();
     return;
   }
-  const windowIcon = getIconPath();
   subscriptionWindow = new BrowserWindow({
     width: 480,
     height: 520,
     show: false,
-    frame: false,
+    ...documentWindowChrome(),
     title: "PROXY, Manage Subscription",
     backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
-    icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
@@ -941,15 +1151,13 @@ function createPresetsWindow() {
     presetsWindow.focus();
     return;
   }
-  const windowIcon = getIconPath();
   presetsWindow = new BrowserWindow({
     width: 880,
     height: 720,
     show: false,
-    frame: false,
+    ...documentWindowChrome(),
     title: "PROXY States",
     backgroundColor: resolveEffectiveTheme() === "light" ? "#ffffff" : "#111318",
-    icon: windowIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
     },
@@ -972,6 +1180,8 @@ ipcMain.handle("get-openrouter-model-name", async () => getOpenRouterModelNameFr
 
 ipcMain.handle("get-app-version", async () => app.getVersion());
 
+ipcMain.handle("get-platform", async () => process.platform);
+
 ipcMain.handle("get-auth-token", async () => {
   let token = store.get("accessToken");
 
@@ -993,8 +1203,20 @@ ipcMain.handle("get-auth-token", async () => {
 });
 
 ipcMain.handle("open-login", async () => {
-  shell.openExternal(AUTH_LOGIN_URL);
-  return { success: true, url: AUTH_LOGIN_URL };
+  let loginUrl = AUTH_LOGIN_URL;
+  try {
+    const port = await startAuthLoopback();
+    if (port) {
+      const u = new URL(AUTH_LOGIN_URL);
+      u.searchParams.set("state", "desktop");
+      u.searchParams.set("loopback", `127.0.0.1:${port}`);
+      loginUrl = u.toString();
+    }
+  } catch (err) {
+    console.warn("[auth] loopback server failed; relying on proxy:// only:", err);
+  }
+  await shell.openExternal(loginUrl);
+  return { success: true, url: loginUrl };
 });
 
 ipcMain.handle("open-external", async (_event, url) => {
@@ -1435,6 +1657,7 @@ ipcMain.handle("close-message-window", async (event) => {
 });
 
 app.whenReady().then(() => {
+  createAppMenu();
   createWindow();
   createTray();
 
@@ -1456,7 +1679,7 @@ app.whenReady().then(() => {
     console.warn("[media] Permission handlers failed:", err);
   }
 
-  // Brief delay so Windows has the tray + AppUserModelID ready for toasts.
+  // Brief delay so the tray / Dock is ready for the welcome toast.
   setTimeout(() => showStartupReadyNotification(), 800);
 
   // Packaged builds only; needs public repo + publish with GITHUB_TOKEN.
@@ -1484,7 +1707,7 @@ app.whenReady().then(() => {
   }
 
   // Cold-start deep link (app was not running when protocol URL opened).
-  const protocolUrl = process.argv.find((arg) => isAuthProtocolUrl(arg));
+  const protocolUrl = findAuthProtocolUrl(process.argv);
   if (protocolUrl) {
     setTimeout(() => handleAuthCallback(protocolUrl), 500);
   }
