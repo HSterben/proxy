@@ -1250,17 +1250,6 @@ html, body {
   min-width: 0;
 }
 
-.chat-voice-beam {
-  margin: 0 18px 18px;
-  flex-shrink: 0;
-  min-width: 0;
-  display: block;
-}
-
-.chat-voice-beam .chat-input-container {
-  margin: 0;
-}
-
 .chat-input-container {
   display: flex;
   flex-direction: column;

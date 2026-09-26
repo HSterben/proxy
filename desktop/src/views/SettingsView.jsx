@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import TitleBar from "../components/TitleBar";
+import AccountAvatar from "../components/AccountAvatar";
 import { useTheme } from "../hooks/useTheme";
+import { useMyProfile } from "../hooks/useMyProfile";
 import { userFacingError } from "../lib/userFacingError";
 import { convexSiteUrl } from "../lib/convexUrls";
 import {
@@ -108,6 +110,13 @@ function ToggleRow({ label, hint, checked, onChange }) {
 
 export default function SettingsView() {
   const { preference, setTheme } = useTheme();
+  const {
+    loading: profileLoading,
+    signedIn: profileSignedIn,
+    displayName,
+    avatarUrl,
+    refresh: refreshProfile,
+  } = useMyProfile();
   const [section, setSection] = useState("general");
   const [keybind, setKeybind] = useState("");
   const [voiceKeybind, setVoiceKeybind] = useState("");
@@ -224,12 +233,14 @@ export default function SettingsView() {
     const unsubSuccess = api?.onAuthSuccess?.(() => {
       setSignedIn(true);
       setSigningIn(false);
+      void refreshProfile();
       setMessage({ text: "Signed in to PROXY.", isError: false });
       setTimeout(() => setMessage(null), 3000);
     });
     const unsubLogout = api?.onAuthLogout?.(() => {
       setSignedIn(false);
       setSigningIn(false);
+      void refreshProfile();
     });
     const unsubError = api?.onAuthError?.(() => {
       setSigningIn(false);
@@ -241,7 +252,7 @@ export default function SettingsView() {
       unsubLogout?.();
       unsubError?.();
     };
-  }, []);
+  }, [refreshProfile]);
 
   const handleSignIn = async () => {
     setSigningIn(true);
@@ -671,13 +682,29 @@ export default function SettingsView() {
             <>
               <h2>Account</h2>
               <div className="settings-account-card">
-                <p className="settings-row-hint">
-                  {signedIn === null
-                    ? "Checking sign-in…"
-                    : signedIn
-                      ? "You’re signed in. States sync and chat messages use this PROXY account."
-                      : "Sign in to send chat messages and sync states across devices."}
-                </p>
+                <div className="settings-account-identity">
+                  <AccountAvatar
+                    name={displayName || (signedIn ? "Account" : "Sign in")}
+                    src={profileSignedIn ? avatarUrl : null}
+                    size={48}
+                  />
+                  <div className="settings-account-identity-text">
+                    <div className="settings-account-name">
+                      {profileLoading && signedIn !== false
+                        ? "Loading…"
+                        : signedIn
+                          ? displayName || "PROXY account"
+                          : "Not signed in"}
+                    </div>
+                    <p className="settings-row-hint">
+                      {signedIn === null
+                        ? "Checking sign-in…"
+                        : signedIn
+                          ? "States sync and chat messages use this PROXY account."
+                          : "Sign in to send chat messages and sync states across devices."}
+                    </p>
+                  </div>
+                </div>
                 <div className="settings-account-actions">
                   {signedIn ? (
                     <button type="button" className="btn-danger" onClick={() => void handleSignOut()}>

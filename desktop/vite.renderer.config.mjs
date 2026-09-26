@@ -20,6 +20,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // backend/convex/_generated is outside desktop/; pin convex so Rollup
+    // does not look under backend/node_modules.
+    resolve: {
+      alias: {
+        convex: path.resolve(__dirname, 'node_modules/convex'),
+      },
+    },
     define: {
       'import.meta.env.OPENROUTER_MODEL_NAME': JSON.stringify(openrouterModelName),
       'import.meta.env.VITE_CONVEX_URL': JSON.stringify(convexUrl),
