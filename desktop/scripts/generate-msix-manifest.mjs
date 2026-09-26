@@ -2,7 +2,7 @@
  * Fill AppxManifest.xml for Forge maker-msix.
  * Declares the proxy:// protocol so Store builds can complete browser sign-in.
  *
- * Env (same as forge.config.js):
+ * Env (same as forge.config.js / desktop/.env):
  *   MSIX_PACKAGE_IDENTITY, MSIX_PUBLISHER, MSIX_PUBLISHER_DISPLAY_NAME
  *
  * Publisher must be the full CN=... string from Partner Center when submitting
@@ -14,6 +14,29 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const text = fs.readFileSync(filePath, "utf8");
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const m = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m) continue;
+    let v = m[2].trim();
+    if (
+      (v.startsWith('"') && v.endsWith('"')) ||
+      (v.startsWith("'") && v.endsWith("'"))
+    ) {
+      v = v.slice(1, -1);
+    }
+    if (process.env[m[1]] === undefined) process.env[m[1]] = v;
+  }
+}
+
+loadEnvFile(path.join(root, ".env.local"));
+loadEnvFile(path.join(root, ".env"));
+
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 function msixVersion(semver) {
@@ -45,7 +68,7 @@ const replacements = {
   DisplayName: "PROXY AI",
   PublisherDisplayName: publisherDisplay,
   MinOSVersion: "10.0.19041.0",
-  MaxOSVersionTested: "10.0.28000.0",
+  MaxOSVersionTested: "10.0.26100.0",
   AppExecutable: "proxy.exe",
   AppDisplayName: "PROXY AI",
   PackageDescription: "PROXY AI - chat assistant",
