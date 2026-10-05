@@ -75,6 +75,9 @@ export default function Account() {
   const [profileNotice, setProfileNotice] = useState('')
   const [profileError, setProfileError] = useState('')
   const [published, setPublished] = useState<PublishedState[] | null>(null)
+  const [activeStateIds, setActiveStateIds] = useState<Set<string>>(new Set())
+  const [activeCount, setActiveCount] = useState(0)
+  const [activeLimit, setActiveLimit] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
@@ -106,14 +109,30 @@ export default function Account() {
   const [betaGrantingId, setBetaGrantingId] = useState<string | null>(null)
 
   const refreshProfileAndPosts = async () => {
-    const [mine, posts] = await Promise.all([
+    const [mine, posts, myStates] = await Promise.all([
       convex.current.query(api.users.getMyProfile, {}),
       convex.current.query(api.gallery.listMine, {}),
+      convex.current.query(api.states.getMyStates, {}),
     ])
     const p = mine as MyProfile | null
     setProfile(p)
     if (p) setDisplayNameDraft(p.displayNameCustom || p.displayName)
     setPublished((posts as PublishedState[]) || [])
+    const library = (myStates as {
+      library?: { id: string; isActive: boolean }[]
+      activeCount?: number
+      activeLimit?: number | null
+    } | null)?.library
+    setActiveStateIds(
+      new Set(
+        (library || [])
+          .filter((row) => row.isActive)
+          .map((row) => row.id),
+      ),
+    )
+    setActiveCount(Number((myStates as { activeCount?: number } | null)?.activeCount ?? 0))
+    const limit = (myStates as { activeLimit?: number | null } | null)?.activeLimit
+    setActiveLimit(limit === undefined ? null : limit)
   }
 
   useEffect(() => {
@@ -362,6 +381,38 @@ export default function Account() {
     }
   }
 
+  const togglePublishedActive = async (post: PublishedState) => {
+    const isActive = activeStateIds.has(post._id)
+    setBusyId(`active-${post._id}`)
+    setProfileError('')
+    try {
+      const result = (await convex.current.mutation(api.states.setStateActive, {
+        stateId: post._id as never,
+        active: !isActive,
+      })) as {
+        library: { id: string; isActive: boolean }[]
+        activeCount: number
+        activeLimit: number | null
+      }
+      setActiveStateIds(
+        new Set(
+          (result.library || [])
+            .filter((row) => row.isActive)
+            .map((row) => row.id),
+        ),
+      )
+      setActiveCount(Number(result.activeCount ?? 0))
+      if (result.activeLimit !== undefined) setActiveLimit(result.activeLimit)
+      showProfileNotice(
+        !isActive ? `“${post.name}” activated for chat` : `“${post.name}” deactivated`,
+      )
+    } catch (err) {
+      setProfileError(userFacingError(err, 'Could not update active States'))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const grantBetaTester = async (target: { workosId: string; email: string | null; name: string }) => {
     setBetaGrantingId(target.workosId)
     setProfileError('')
@@ -573,7 +624,11 @@ export default function Account() {
           <div>
             <h2 className="text-lg font-semibold">Your states</h2>
             <p className="mt-1 text-[15px] text-ink/55">
-              States you created. New ones stay private unless you turn on Make public.
+              States you created. Private ones stay off the gallery — activate them here
+              or from Library on the States page.
+              {activeLimit == null
+                ? ` ${activeCount} active.`
+                : ` ${activeCount} / ${activeLimit} active.`}
             </p>
           </div>
           <Link
@@ -598,6 +653,9 @@ export default function Account() {
             {published.map((post) => {
               const isEditing = editingId === post._id
               const isPublic = post.visibility === 'public'
+              const isActive = activeStateIds.has(post._id)
+              const atActiveLimit =
+                !isActive && activeLimit != null && activeCount >= activeLimit
               return (
                 <li key={post._id} className="py-3">
                   {!isEditing ? (
@@ -614,6 +672,11 @@ export default function Account() {
                           >
                             {isPublic ? 'Public' : 'Private'}
                           </span>
+                          {isActive && (
+                            <span className="rounded-md border border-emerald-600/20 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                              Active
+                            </span>
+                          )}
                         </div>
                         <p className="truncate text-[14px] text-ink/50">
                           {post.description}
@@ -621,13 +684,46 @@ export default function Account() {
                           {post.saveCount > 0 ? ` · ${post.saveCount} saves` : ''}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        className="pressable inline-flex shrink-0 items-center rounded-[8px] border border-hairline px-3 py-1.5 text-[13px] text-ink/70"
-                        onClick={() => openEdit(post)}
-                      >
-                        Edit
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={
+                            busyId === `active-${post._id}` || atActiveLimit
+                          }
+                          title={
+                            atActiveLimit
+                              ? activeLimit === 5
+                                ? 'Beta accounts can have up to 5 active States.'
+                                : 'Free accounts can have up to 3 active States.'
+                              : isActive
+                                ? 'Deactivate this State'
+                                : 'Activate this State for chat'
+                          }
+                          className={`pressable inline-flex items-center rounded-[8px] px-3 py-1.5 text-[13px] font-medium disabled:opacity-60 ${
+                            isActive
+                              ? 'border border-emerald-600/20 bg-emerald-50 text-emerald-800'
+                              : 'bg-black text-white'
+                          }`}
+                          onClick={() => void togglePublishedActive(post)}
+                        >
+                          {busyId === `active-${post._id}` ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : atActiveLimit ? (
+                            'Slots full'
+                          ) : isActive ? (
+                            'Active'
+                          ) : (
+                            'Activate'
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="pressable inline-flex items-center rounded-[8px] border border-hairline px-3 py-1.5 text-[13px] text-ink/70"
+                          onClick={() => openEdit(post)}
+                        >
+                          Edit
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-3 rounded-[10px] border border-hairline bg-paper-muted/40 p-4">

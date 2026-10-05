@@ -164,6 +164,7 @@ function optionsFromPreset(
 async function readSseStream(
   response: Response,
   onChunk: (chunk: string) => void,
+  onTextChunk?: () => void,
 ): Promise<string> {
   if (!response.body) throw new Error('Response body is null - streaming not supported')
   const reader = response.body.getReader()
@@ -184,12 +185,15 @@ async function readSseStream(
       if (parsed.error) throw new Error(parsed.error)
       const delta = parsed.choices?.[0]?.delta?.content
       const message = parsed.choices?.[0]?.message?.content
+      // Prefer delta; full message.content is often the entire reply on the last chunk.
       if (delta) {
         fullContent += delta
         onChunk(delta)
+        onTextChunk?.()
       } else if (message) {
         fullContent += message
         onChunk(message)
+        onTextChunk?.()
       }
     } catch (err) {
       if (err instanceof Error && err.message !== 'Unexpected end of JSON input') {
@@ -612,16 +616,40 @@ export default function AppChat() {
     options: ChatOptions,
     onChunk: (chunk: string) => void,
   ) => {
-    const response = await fetch(`${convexSiteUrl}/openrouter/stream`, {
-      method: 'POST',
-      headers: await bearerHeaders(),
-      body: JSON.stringify(chatBody(message, files, options)),
-    })
-    if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as { error?: string }
-      throw new Error(errorData.error || `HTTP error: ${response.status}`)
+    const controller = new AbortController()
+    const hasImages = files.length > 0
+    const idleMs = hasImages ? 120000 : 90000
+    const hardMs = hasImages ? 180000 : 120000
+    let idleId = setTimeout(() => controller.abort(), idleMs)
+    const hardId = setTimeout(() => controller.abort(), hardMs)
+    const bumpIdle = () => {
+      clearTimeout(idleId)
+      idleId = setTimeout(() => controller.abort(), idleMs)
     }
-    return readSseStream(response, onChunk)
+    const clearTimers = () => {
+      clearTimeout(idleId)
+      clearTimeout(hardId)
+    }
+    try {
+      const response = await fetch(`${convexSiteUrl}/openrouter/stream`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: await bearerHeaders(),
+        body: JSON.stringify(chatBody(message, files, options)),
+      })
+      if (!response.ok) {
+        const errorData = (await response.json().catch(() => ({}))) as { error?: string }
+        throw new Error(errorData.error || `HTTP error: ${response.status}`)
+      }
+      return await readSseStream(response, onChunk, bumpIdle)
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        throw new Error('Request timed out. Try a shorter question, or send the image again.')
+      }
+      throw e
+    } finally {
+      clearTimers()
+    }
   }
 
   const askOpenRouterComplete = async (message: string, files: AttachedFile[], options: ChatOptions) => {
@@ -831,14 +859,7 @@ export default function AppChat() {
     }
     setMessages((prev) => [...prev, userMessage])
     stickToBottomRef.current = true
-    conversationContext.current = [
-      ...conversationContext.current,
-      {
-        text: messageText || '',
-        sender: 'user',
-        images: filesToSend.length > 0 ? filesToSend.map((f) => f.dataUrl) : undefined,
-      },
-    ]
+    // conversationContext is updated only after a successful reply in getAIResponse
     await getAIResponse(messageText || '', filesToSend)
   }
 

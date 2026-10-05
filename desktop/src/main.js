@@ -121,13 +121,21 @@ function formatKeybindForHumans(accel) {
   const raw = String(accel || DEFAULT_KEYBIND);
   const mod = IS_MAC ? "⌘" : "Ctrl";
   return raw
-    .replace(/CommandOrControl/g, mod)
-    .replace(/Command/g, "⌘")
-    .replace(/Control/g, "Ctrl")
-    .replace(/Option/g, "⌥")
-    .replace(/Alt/g, IS_MAC ? "⌥" : "Alt")
-    .replace(/Shift/g, "Shift")
-    .replace(/\+/g, "+");
+    .split("+")
+    .map((part) => {
+      const p = part.trim();
+      if (!p) return "";
+      if (/^CommandOrControl$/i.test(p) || /^CmdOrCtrl$/i.test(p)) return mod;
+      if (/^Command$/i.test(p) || /^Cmd$/i.test(p) || /^Meta$/i.test(p)) {
+        return IS_MAC ? "⌘" : "Ctrl";
+      }
+      if (/^Control$/i.test(p) || /^Ctrl$/i.test(p)) return "Ctrl";
+      if (/^Option$/i.test(p) || /^Alt$/i.test(p)) return IS_MAC ? "⌥" : "Alt";
+      if (/^Shift$/i.test(p)) return "Shift";
+      return p;
+    })
+    .filter(Boolean)
+    .join("+");
 }
 
 function areNotificationsEnabled() {

@@ -730,6 +730,22 @@ const ChatView = () => {
     const systemInstruction = options.systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION;
     const contextMessages = buildContextMessages(message, files, systemInstruction);
     const maxTokens = clampOutputTokens(options.maxTokens);
+    const controller = new AbortController();
+    // Previously no timeout — hung streams left isLoading true and swallowed follow-ups.
+    // Idle timer only resets on real text chunks (Convex keepalives must not keep it alive).
+    const hasImages = Array.isArray(files) && files.length > 0;
+    const idleMs = hasImages ? 120000 : 90000;
+    const hardMs = hasImages ? 180000 : 120000;
+    let idleId = setTimeout(() => controller.abort(), idleMs);
+    const hardId = setTimeout(() => controller.abort(), hardMs);
+    const bumpIdle = () => {
+      clearTimeout(idleId);
+      idleId = setTimeout(() => controller.abort(), idleMs);
+    };
+    const clearTimers = () => {
+      clearTimeout(idleId);
+      clearTimeout(hardId);
+    };
 
     try {
       const token = await resolveAccessToken();
@@ -738,6 +754,7 @@ const ChatView = () => {
       const streamUrl = `${getConvexSiteBaseUrl()}/openrouter/stream`;
       const response = await fetch(streamUrl, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
@@ -759,6 +776,7 @@ const ChatView = () => {
         const errorMessage = errorData.error || `HTTP error: ${response.status}`;
         
         if (!isRetry && (response.status === 401 || errorMessage.includes('Authentication'))) {
+          clearTimers();
           const refreshed = await refreshAndRetry();
           if (refreshed) {
             return askOpenRouterStream(message, files, options, onChunk, true);
@@ -812,13 +830,12 @@ const ChatView = () => {
                     if (delta?.content) {
                       fullContent += delta.content;
                       onChunk(delta.content);
-                    }
-                    
-                    // Some upstream payloads put content on message instead of delta.
-                    const message = parsed.choices?.[0]?.message;
-                    if (message?.content) {
-                      fullContent += message.content;
-                      onChunk(message.content);
+                    } else {
+                      const message = parsed.choices?.[0]?.message;
+                      if (message?.content) {
+                        fullContent += message.content;
+                        onChunk(message.content);
+                      }
                     }
 
                     if (parsed.id) messageId = parsed.id;
@@ -863,13 +880,14 @@ const ChatView = () => {
                 if (delta?.content) {
                   fullContent += delta.content;
                   onChunk(delta.content);
-                }
-                
-                // Some upstream payloads put content on message instead of delta.
-                const message = parsed.choices?.[0]?.message;
-                if (message?.content) {
-                  fullContent += message.content;
-                  onChunk(message.content);
+                  bumpIdle();
+                } else {
+                  const message = parsed.choices?.[0]?.message;
+                  if (message?.content) {
+                    fullContent += message.content;
+                    onChunk(message.content);
+                    bumpIdle();
+                  }
                 }
 
                 if (parsed.id) messageId = parsed.id;
@@ -894,11 +912,15 @@ const ChatView = () => {
       };
     } catch (error) {
       console.error('Streaming fetch error:', error);
-      // Provide more helpful error messages
+      if (error?.name === 'AbortError') {
+        throw new Error('Request timed out. Try a shorter question, or send the image again.');
+      }
       if (error instanceof TypeError && error.message.includes('fetch')) {
         throw new Error('Couldn’t connect. Check your internet connection and try again.');
       }
       throw error;
+    } finally {
+      clearTimers();
     }
   };
 
@@ -1239,13 +1261,9 @@ const ChatView = () => {
         files,
       },
     ]);
-    conversationContext.current = [
-      {
-        text,
-        sender: 'user',
-        images: files.length > 0 ? files.map((f) => f.dataUrl) : undefined,
-      },
-    ];
+    // Context is filled only after a successful AI reply (avoids duplicating the
+    // current turn + re-sending image payloads on every follow-up).
+    conversationContext.current = [];
     stickToBottomRef.current = true;
 
     if (isAuthenticatedRef.current === true && getAIResponseRef.current) {
@@ -1512,17 +1530,7 @@ const ChatView = () => {
     setMessages(prev => [...prev, userMessage]);
     stickToBottomRef.current = true;
     
-    // Update conversation context
-    conversationContext.current = [
-      ...conversationContext.current,
-      { 
-        text: messageText || '', 
-        sender: 'user',
-        images: filesToSend.length > 0 ? filesToSend.map(f => f.dataUrl) : undefined
-      }
-    ];
-    
-    // Get AI response
+    // Get AI response (conversationContext updated only on success inside getAIResponse)
     await getAIResponse(messageText || '', filesToSend);
   };
 

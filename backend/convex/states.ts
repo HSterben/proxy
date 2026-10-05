@@ -498,6 +498,76 @@ export async function addLibraryMembership(
 }
 
 /**
+ * Trigger words are the chat keyword. They must be unique in a user's library
+ * (case-insensitive), and must not collide with official default names.
+ */
+export async function assertUniqueLibraryTriggerName(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  workosId: string,
+  name: string,
+  exceptStateId?: Id<'states'>,
+): Promise<void> {
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  if (!lower) throw new Error('Name is required');
+
+  if (isDefaultStateName(trimmed)) {
+    throw new Error(
+      `"${trimmed}" is an official PROXY State name. Pick a different trigger word.`,
+    );
+  }
+
+  const authored: Doc<'states'>[] = await ctx.db
+    .query('states')
+    .withIndex('by_author', (q: any) => q.eq('authorWorkosId', workosId))
+    .collect();
+  for (const doc of authored) {
+    if (exceptStateId && doc._id === exceptStateId) continue;
+    if (doc.name.trim().toLowerCase() === lower) {
+      throw new Error(
+        `You already have a state named "${doc.name}". Trigger words must be unique (case doesn’t matter).`,
+      );
+    }
+  }
+
+  for (const id of await listLibraryStateIds(ctx, workosId)) {
+    if (exceptStateId && id === exceptStateId) continue;
+    const doc = await ctx.db.get(id);
+    if (!doc || doc.authorWorkosId === workosId) continue;
+    if (doc.name.trim().toLowerCase() === lower) {
+      throw new Error(
+        `You already have “${doc.name}” in your library. Trigger words must be unique (case doesn’t matter). Rename one before continuing.`,
+      );
+    }
+  }
+}
+
+/** Activate a library membership when the plan still has an open slot. */
+export async function tryActivateLibraryState(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: { db: any },
+  workosId: string,
+  stateId: Id<'states'>,
+): Promise<boolean> {
+  const entitlements = await resolveStateEntitlements(ctx, workosId);
+  const row = await ctx.db
+    .query('userStates')
+    .withIndex('by_user_state', (q: any) =>
+      q.eq('workosId', workosId).eq('stateId', stateId),
+    )
+    .first();
+  if (!row) return false;
+  if (row.isActive === true) return true;
+  if (entitlements.activeLimit != null) {
+    const count = await activeMembershipCount(ctx, workosId);
+    if (count >= entitlements.activeLimit) return false;
+  }
+  await ctx.db.patch(row._id, { isActive: true, updatedAt: Date.now() });
+  return true;
+}
+
+/**
  * Remove redundant private clones of official defaults and duplicate owned
  * rows; rewrite M:N membership to the reconciled ID list.
  */

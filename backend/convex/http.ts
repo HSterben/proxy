@@ -923,11 +923,41 @@ function processMessages(
   }));
   // Drop client-supplied system messages; identity + state instruction are authoritative.
   const withoutSystem = processed.filter((m) => m.role !== 'system');
-  withoutSystem.unshift({
+
+  // Collapse consecutive duplicate user turns (legacy clients sometimes sent the
+  // current prompt both in history and as the new message).
+  const contentKey = (content: ChatMessage['content']): string => {
+    if (typeof content === 'string') return content.trim();
+    if (!Array.isArray(content)) return String(content ?? '').trim();
+    return content
+      .map((part) => {
+        if (!part || typeof part !== 'object') return '';
+        if (part.type === 'text') return String(part.text || '').trim();
+        if (part.type === 'image_url') return `img:${part.image_url?.url || ''}`;
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  };
+  const deduped: typeof withoutSystem = [];
+  for (const msg of withoutSystem) {
+    const prev = deduped[deduped.length - 1];
+    if (
+      prev &&
+      prev.role === 'user' &&
+      msg.role === 'user' &&
+      contentKey(prev.content) === contentKey(msg.content)
+    ) {
+      continue;
+    }
+    deduped.push(msg);
+  }
+
+  deduped.unshift({
     role: 'system',
     content: withProxyIdentity(systemInstruction),
   });
-  return withoutSystem;
+  return deduped;
 }
 
 async function recordUsage(

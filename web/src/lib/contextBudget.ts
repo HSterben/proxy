@@ -88,6 +88,54 @@ export function selectHistoryNewestFirst(
   return picked
 }
 
+function contentFingerprint(content: ApiMessage['content']): string {
+  if (typeof content === 'string') return content.trim()
+  if (!Array.isArray(content)) return String(content ?? '').trim()
+  return content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return ''
+      if (part.type === 'text') return String(part.text || '').trim()
+      if (part.type === 'image_url') return `img:${part.image_url?.url || ''}`
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** Drop consecutive duplicate user turns and a trailing history match of `current`. */
+export function dedupeHistoryForCurrent(
+  historyMessages: ApiMessage[],
+  currentMessage: ApiMessage,
+): ApiMessage[] {
+  const history = Array.isArray(historyMessages) ? [...historyMessages] : []
+  const currentFp =
+    currentMessage?.role === 'user' ? contentFingerprint(currentMessage.content) : ''
+
+  while (
+    currentFp &&
+    history.length > 0 &&
+    history[history.length - 1]?.role === 'user' &&
+    contentFingerprint(history[history.length - 1].content) === currentFp
+  ) {
+    history.pop()
+  }
+
+  const out: ApiMessage[] = []
+  for (const msg of history) {
+    const prev = out[out.length - 1]
+    if (
+      prev &&
+      prev.role === 'user' &&
+      msg?.role === 'user' &&
+      contentFingerprint(prev.content) === contentFingerprint(msg.content)
+    ) {
+      continue
+    }
+    out.push(msg)
+  }
+  return out
+}
+
 export function buildBudgetedMessages(opts: {
   historyMessages: ApiMessage[]
   currentMessage: ApiMessage
@@ -121,7 +169,7 @@ export function buildBudgetedMessages(opts: {
   }
 
   const historyBudget = limit - reserved
-  const history = Array.isArray(historyMessages) ? historyMessages : []
+  const history = dedupeHistoryForCurrent(historyMessages, currentMessage)
   const packedHistory = selectHistoryNewestFirst(history, historyBudget)
   const historyTokens = packedHistory.reduce((sum, m) => sum + estimateMessageTokens(m), 0)
 
@@ -144,12 +192,14 @@ export function historyToApiMessages(
   if (!Array.isArray(history)) return []
   return history.map((msg) => {
     const role = msg.sender === 'user' ? 'user' : 'assistant'
-    if (msg.images?.length) {
-      const content: ApiContentPart[] = [
-        { type: 'text', text: msg.text || '' },
-        ...msg.images.map((img) => ({ type: 'image_url' as const, image_url: { url: img } })),
-      ]
-      return { role, content }
+    const imageCount = Array.isArray(msg.images) ? msg.images.length : 0
+    if (imageCount > 0) {
+      const label =
+        imageCount === 1
+          ? '[User attached 1 image earlier in this chat]'
+          : `[User attached ${imageCount} images earlier in this chat]`
+      const text = (msg.text || '').trim()
+      return { role, content: text ? `${text}\n\n${label}` : label }
     }
     return { role, content: msg.text || '' }
   })

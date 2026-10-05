@@ -9,11 +9,13 @@ import {
 } from './defaultStates';
 import {
   addLibraryMembership,
+  assertUniqueLibraryTriggerName,
   listLibraryStateIds,
   normalizeState,
   resolveLibraryIds,
   resolveVisibility,
   stateValueValidator,
+  tryActivateLibraryState,
   upsertOfficialDefaultStates,
   type Visibility,
 } from './states';
@@ -224,7 +226,7 @@ export const publish = mutation({
     tags: v.optional(v.array(v.string())),
     visibility: v.optional(v.union(v.literal('public'), v.literal('private'))),
   },
-  returns: v.object({ id: v.id('states') }),
+  returns: v.object({ id: v.id('states'), activated: v.boolean() }),
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error('Sign in to create a state');
@@ -258,6 +260,7 @@ export const publish = mutation({
     const now = Date.now();
 
     await resolveLibraryIds(ctx, identity.subject, displayName);
+    await assertUniqueLibraryTriggerName(ctx, identity.subject, name);
 
     const id = await ctx.db.insert('states', {
       name,
@@ -275,7 +278,9 @@ export const publish = mutation({
     });
 
     await addLibraryMembership(ctx, identity.subject, id);
-    return { id };
+    // Private gallery-invisible states still need an active slot to use in chat.
+    const activated = await tryActivateLibraryState(ctx, identity.subject, id);
+    return { id, activated };
   },
 });
 
@@ -354,6 +359,17 @@ export const saveToMine = mutation({
 
     const user = await ensureUserFromIdentity(ctx, identity);
     await resolveLibraryIds(ctx, identity.subject, resolveDisplayName(user));
+
+    const savedAs = args.asName?.trim() || post.name;
+    // Chat matches by trigger word; refuse colliding names instead of silently
+    // hiding one of the two library entries.
+    await assertUniqueLibraryTriggerName(
+      ctx,
+      identity.subject,
+      savedAs,
+      stateId,
+    );
+
     const added = await addLibraryMembership(ctx, identity.subject, stateId);
     if (added) {
       await ctx.db.patch(post._id, {
@@ -362,7 +378,7 @@ export const saveToMine = mutation({
       });
     }
 
-    return { savedAs: args.asName?.trim() || post.name };
+    return { savedAs };
   },
 });
 
@@ -405,6 +421,13 @@ export const updatePublished = mutation({
     if (!description || description.length > 500) {
       throw new Error('Description must be 1–500 characters');
     }
+
+    await assertUniqueLibraryTriggerName(
+      ctx,
+      identity.subject,
+      name,
+      stateId,
+    );
 
     const state = normalizeState(args.state);
     const hasInstruction =

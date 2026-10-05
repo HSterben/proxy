@@ -64,3 +64,9 @@ export function smoothScrollTop(immediate = true) {
   }
   window.scrollTo({ top: 0, left: 0, behavior: immediate ? 'auto' : 'smooth' })
 }
+
+/** Pause ScrollSmoother while a viewport-fixed overlay is open (modals, sheets). */
+export function setSmoothScrollPaused(paused: boolean) {
+  const smoother = ScrollSmoother.get()
+  if (smoother) smoother.paused(paused)
+}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { ConvexClient } from 'convex/browser'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
@@ -9,6 +10,7 @@ import { convexUrl } from '../lib/convexUrls'
 import Reveal from '../components/ui/Reveal'
 import { AuthorByline } from '../components/ui/ProfileAvatar'
 import { userFacingError } from '../lib/userFacingError'
+import { setSmoothScrollPaused } from '../lib/smoothScroll'
 
 const TAG_OPTIONS = ['Writing', 'Creative', 'Utility', 'Translation', 'Fun'] as const
 
@@ -48,10 +50,44 @@ type CommunityState = {
 
 type MyStatesMap = Record<string, StateFields>
 
-type ScopeFilter = 'all' | 'saved' | 'starred' | 'official'
+type LibraryRow = {
+  id: string
+  name: string
+  description: string
+  visibility: Visibility
+  isOfficial: boolean
+  isOwner: boolean
+  isActive: boolean
+  state: StateFields
+}
+
+type ScopeFilter = 'all' | 'library' | 'saved' | 'starred' | 'official'
 
 function instructionOf(state: StateFields) {
   return (state.systemInstruction || state.system_instruction || '').trim()
+}
+
+function libraryRowToPost(
+  row: LibraryRow,
+  myWorkosId: string | null,
+): CommunityState {
+  return {
+    _id: row.id,
+    name: row.name,
+    description: row.description,
+    authorDisplayName: row.isOwner ? 'You' : row.isOfficial ? 'PROXY' : 'Library',
+    authorWorkosId: row.isOwner && myWorkosId ? myWorkosId : row.isOfficial ? 'official' : '',
+    authorAvatarUrl: null,
+    tags: [],
+    visibility: row.visibility,
+    saveCount: 0,
+    starCount: 0,
+    starredByMe: false,
+    savedByMe: true,
+    isOfficial: row.isOfficial,
+    createdAt: 0,
+    state: row.state,
+  }
 }
 
 function formatDate(ms: number) {
@@ -115,13 +151,37 @@ export default function States() {
   const [canCreateStates, setCanCreateStates] = useState(false)
   const [activeCount, setActiveCount] = useState(0)
   const [activeLimit, setActiveLimit] = useState<number | null>(null)
-  const [libraryMeta, setLibraryMeta] = useState<
-    { id: string; name: string; isActive: boolean }[]
-  >([])
+  const [libraryRows, setLibraryRows] = useState<LibraryRow[]>([])
   const reduceMotion = useReducedMotion()
 
-  const myStateNames = useMemo(() => Object.keys(myStates).sort(), [myStates])
-  const libraryCount = myStateNames.length
+  const libraryMeta = useMemo(
+    () =>
+      libraryRows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        isActive: row.isActive,
+      })),
+    [libraryRows],
+  )
+  const libraryCount = libraryRows.length
+
+  const applyLibrarySnapshot = (
+    library: { id: string; name: string; description?: string; visibility?: Visibility; isOfficial?: boolean; isOwner?: boolean; isActive: boolean; state?: StateFields }[] | undefined,
+  ) => {
+    if (!Array.isArray(library)) return
+    setLibraryRows(
+      library.map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description || '',
+        visibility: row.visibility === 'public' ? 'public' : 'private',
+        isOfficial: Boolean(row.isOfficial),
+        isOwner: Boolean(row.isOwner),
+        isActive: Boolean(row.isActive),
+        state: (row.state || {}) as StateFields,
+      })),
+    )
+  }
 
   const refresh = async () => {
     setError('')
@@ -154,7 +214,7 @@ export default function States() {
       setMyWorkosId(null)
       setCanPublishStates(false)
       setCanCreateStates(false)
-      setLibraryMeta([])
+      setLibraryRows([])
       setActiveCount(0)
       return
     }
@@ -168,17 +228,7 @@ export default function States() {
           convex.current.query(api.account.getMyAccount, {}),
         ])
         if (mine?.states) setMyStates(mine.states as MyStatesMap)
-        if (Array.isArray(mine?.library)) {
-          setLibraryMeta(
-            (mine.library as { id: string; name: string; isActive: boolean }[]).map(
-              (row) => ({
-                id: row.id,
-                name: row.name,
-                isActive: Boolean(row.isActive),
-              }),
-            ),
-          )
-        }
+        applyLibrarySnapshot(mine?.library as LibraryRow[] | undefined)
         setActiveCount(Number(mine?.activeCount ?? 0))
         setActiveLimit(
           mine?.activeLimit === undefined ? null : (mine.activeLimit as number | null),
@@ -214,12 +264,8 @@ export default function States() {
   )
 
   const filteredPosts = useMemo(() => {
-    if (!posts) return null
     const q = query.trim().toLowerCase()
-    return posts.filter((post) => {
-      if (scope === 'saved' && !activeIdSet.has(post._id)) return false
-      if (scope === 'starred' && !post.starredByMe) return false
-      if (scope === 'official' && !post.isOfficial) return false
+    const matchesQuery = (post: CommunityState) => {
       if (activeTag && !(post.tags || []).includes(activeTag)) return false
       if (!q) return true
       const hay = [
@@ -232,12 +278,39 @@ export default function States() {
         .join(' ')
         .toLowerCase()
       return hay.includes(q)
+    }
+
+    // Library / Active come from membership data so private States are visible.
+    if (scope === 'library' || scope === 'saved') {
+      if (!user) return []
+      const galleryById = new Map((posts || []).map((p) => [p._id, p]))
+      return libraryRows
+        .filter((row) => (scope === 'saved' ? row.isActive : true))
+        .map((row) => {
+          const fromGallery = galleryById.get(row.id)
+          if (fromGallery) {
+            return {
+              ...fromGallery,
+              savedByMe: true,
+              visibility: row.visibility,
+            }
+          }
+          return libraryRowToPost(row, myWorkosId)
+        })
+        .filter(matchesQuery)
+    }
+
+    if (!posts) return null
+    return posts.filter((post) => {
+      if (scope === 'starred' && !post.starredByMe) return false
+      if (scope === 'official' && !post.isOfficial) return false
+      return matchesQuery(post)
     })
-  }, [posts, scope, activeTag, query, activeIdSet])
+  }, [posts, scope, activeTag, query, libraryRows, user, myWorkosId])
 
   const activeInViewCount = useMemo(
-    () => (posts ? posts.filter((p) => activeIdSet.has(p._id)).length : 0),
-    [posts, activeIdSet],
+    () => libraryRows.filter((row) => row.isActive).length,
+    [libraryRows],
   )
 
   const handleSave = async (post: CommunityState) => {
@@ -256,9 +329,21 @@ export default function States() {
           ...post.state,
         },
       }))
-      setLibraryMeta((prev) => {
+      setLibraryRows((prev) => {
         if (prev.some((row) => row.id === post._id)) return prev
-        return [...prev, { id: post._id, name: post.name, isActive: false }]
+        return [
+          ...prev,
+          {
+            id: post._id,
+            name: post.name,
+            description: post.description,
+            visibility: post.visibility,
+            isOfficial: post.isOfficial,
+            isOwner: false,
+            isActive: false,
+            state: post.state,
+          },
+        ]
       })
       setPosts((prev) =>
         prev
@@ -288,18 +373,12 @@ export default function States() {
         stateId: post._id as never,
         active: nextActive,
       })) as {
-        library: { id: string; name: string; isActive: boolean }[]
+        library: LibraryRow[]
         activeCount: number
         activeLimit: number | null
         states: MyStatesMap
       }
-      setLibraryMeta(
-        (result.library || []).map((row) => ({
-          id: row.id,
-          name: row.name,
-          isActive: Boolean(row.isActive),
-        })),
-      )
+      applyLibrarySnapshot(result.library)
       setActiveCount(Number(result.activeCount ?? 0))
       setActiveLimit(
         result.activeLimit === undefined ? activeLimit : result.activeLimit,
@@ -348,8 +427,16 @@ export default function States() {
     try {
       const result = (await convex.current.mutation(api.states.removeMyState, {
         stateId: post._id as never,
-      })) as { states: MyStatesMap }
+      })) as { states: MyStatesMap; library?: LibraryRow[]; activeCount?: number }
       setMyStates(result.states || {})
+      if (result.library) {
+        applyLibrarySnapshot(result.library)
+      } else {
+        setLibraryRows((prev) => prev.filter((row) => row.id !== post._id))
+      }
+      if (typeof result.activeCount === 'number') {
+        setActiveCount(result.activeCount)
+      }
       setPosts((prev) =>
         prev
           ? prev.map((p) => (p._id === post._id ? { ...p, savedByMe: false } : p))
@@ -450,6 +537,7 @@ export default function States() {
 
   useEffect(() => {
     if (!editingId) return
+    setSmoothScrollPaused(true)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
@@ -457,6 +545,7 @@ export default function States() {
     }
     window.addEventListener('keydown', onKey)
     return () => {
+      setSmoothScrollPaused(false)
       document.body.style.overflow = prev
       window.removeEventListener('keydown', onKey)
     }
@@ -528,22 +617,37 @@ export default function States() {
       if (presencePenalty !== undefined) state.presencePenalty = presencePenalty
       if (maxTokens !== undefined) state.maxTokens = maxTokens
 
-      await convex.current.mutation(api.gallery.publish, {
+      const published = (await convex.current.mutation(api.gallery.publish, {
         name: publishName,
         description: publishDescription,
         state,
         tags: publishTags,
         visibility: publishVisibility,
-      })
+      })) as { id: string; activated: boolean }
       setPublishOpen(false)
       resetPublishForm()
-      showNotice(
-        publishVisibility === 'public'
-          ? 'Published to the community gallery'
-          : 'Private state saved to your account',
-      )
       const mine = await convex.current.query(api.states.getMyStates, {})
       if (mine?.states) setMyStates(mine.states as MyStatesMap)
+      applyLibrarySnapshot(mine?.library as LibraryRow[] | undefined)
+      setActiveCount(Number(mine?.activeCount ?? 0))
+      setActiveLimit(
+        mine?.activeLimit === undefined ? null : (mine.activeLimit as number | null),
+      )
+      if (publishVisibility === 'public') {
+        showNotice(
+          published.activated
+            ? 'Published and activated for chat'
+            : 'Published — activate it from Library when you have a free slot',
+        )
+      } else if (published.activated) {
+        showNotice('Private state created and activated for chat')
+        setScope('library')
+      } else {
+        showNotice(
+          'Private state saved. Activate it from Library when you have a free slot.',
+        )
+        setScope('library')
+      }
       await refresh()
     } catch (err) {
       setError(userFacingError(err, 'Could not save state'))
@@ -554,6 +658,11 @@ export default function States() {
 
   const scopeFilters: { id: ScopeFilter; label: string; count?: number }[] = [
     { id: 'all', label: 'All' },
+    {
+      id: 'library',
+      label: 'Library',
+      count: user ? libraryCount : undefined,
+    },
     {
       id: 'saved',
       label: 'Active',
@@ -893,7 +1002,11 @@ export default function States() {
                   : `${activeCount} / ${activeLimit} active`}
                 {' · '}
                 {libraryCount} in library
-                {scope === 'saved' ? ' · showing active States' : ''}
+                {scope === 'library'
+                  ? ' · your library (includes private)'
+                  : scope === 'saved'
+                    ? ' · showing active States'
+                    : ''}
               </p>
             )}
           </div>
@@ -903,12 +1016,22 @@ export default function States() {
           ) : filteredPosts.length === 0 ? (
             <div className="card p-8 text-center">
               <h2 className="text-lg font-semibold">
-                {posts && posts.length === 0 ? 'No states yet' : 'Nothing matches'}
+                {scope === 'library'
+                  ? 'Library is empty'
+                  : scope === 'saved'
+                    ? 'No active States'
+                    : posts && posts.length === 0
+                      ? 'No states yet'
+                      : 'Nothing matches'}
               </h2>
               <p className="mt-2 text-ink/55">
-                {posts && posts.length === 0
-                  ? 'Be the first to publish a public state.'
-                  : 'Try another filter, tag, or search term.'}
+                {scope === 'library'
+                  ? 'Create a state or save one from the gallery.'
+                  : scope === 'saved'
+                    ? 'Activate a State from Library or the gallery to use it in chat.'
+                    : posts && posts.length === 0
+                      ? 'Be the first to publish a public state.'
+                      : 'Try another filter, tag, or search term.'}
               </p>
               {(scope !== 'all' || activeTag || query) && (
                 <button
@@ -967,22 +1090,29 @@ export default function States() {
                                 Official
                               </span>
                             )}
+                            {!post.isOfficial && post.visibility === 'private' && (
+                              <span className="rounded-md border border-hairline bg-paper-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink/45">
+                                Private
+                              </span>
+                            )}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          disabled={busyId === `star-${post._id}`}
-                          className="pressable inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-hairline px-2 py-1 text-[13px] text-ink/70 disabled:opacity-60"
-                          onClick={() => void handleStar(post)}
-                          aria-label={post.starredByMe ? 'Unstar' : 'Star'}
-                          title={post.starredByMe ? 'Unstar' : 'Star'}
-                        >
-                          <Star
-                            className={`h-4 w-4 ${post.starredByMe ? 'fill-current text-ink' : ''}`}
-                            strokeWidth={1.5}
-                          />
-                          {post.starCount ?? 0}
-                        </button>
+                        {post.visibility === 'public' ? (
+                          <button
+                            type="button"
+                            disabled={busyId === `star-${post._id}`}
+                            className="pressable inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-hairline px-2 py-1 text-[13px] text-ink/70 disabled:opacity-60"
+                            onClick={() => void handleStar(post)}
+                            aria-label={post.starredByMe ? 'Unstar' : 'Star'}
+                            title={post.starredByMe ? 'Unstar' : 'Star'}
+                          >
+                            <Star
+                              className={`h-4 w-4 ${post.starredByMe ? 'fill-current text-ink' : ''}`}
+                              strokeWidth={1.5}
+                            />
+                            {post.starCount ?? 0}
+                          </button>
+                        ) : null}
                       </div>
 
                       {tags.length > 0 && (
@@ -1184,203 +1314,206 @@ export default function States() {
         </div>
       </section>
 
-      <AnimatePresence>
-        {editingId && (
-          <motion.div
-            className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reduceMotion ? 0 : 0.18 }}
-          >
-            <button
-              type="button"
-              aria-label="Close editor"
-              className="absolute inset-0 bg-black/55"
-              onClick={closeEdit}
-            />
+      {createPortal(
+        <AnimatePresence>
+          {editingId && (
             <motion.div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="edit-state-title"
-              className="relative z-[1] flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col overflow-hidden rounded-[14px] border border-hairline bg-white shadow-2xl"
-              initial={reduceMotion ? false : { opacity: 0, y: 16, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={reduceMotion ? undefined : { opacity: 0, y: 10, scale: 0.98 }}
-              transition={{ duration: 0.2 }}
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 pt-20"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: reduceMotion ? 0 : 0.18 }}
             >
-              <div className="flex items-center justify-between gap-3 border-b border-hairline px-5 py-4">
-                <h2 id="edit-state-title" className="text-lg font-semibold">
-                  Edit {editingPost ? `“${editingPost.name}”` : 'state'}
-                </h2>
-                <button
-                  type="button"
-                  className="pressable inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-ink/50 hover:bg-paper-muted hover:text-ink"
-                  onClick={closeEdit}
-                  aria-label="Cancel"
-                >
-                  <X className="h-5 w-5" strokeWidth={1.5} />
-                </button>
-              </div>
-
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
-                <label className="block text-[14px]">
-                  <span className="text-ink/50">Name</span>
-                  <input
-                    className="mt-1 w-full rounded-[10px] border border-hairline bg-white px-3 py-2"
-                    maxLength={64}
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                  />
-                </label>
-                <label className="block text-[14px]">
-                  <span className="text-ink/50">Description</span>
-                  <textarea
-                    className="mt-1 w-full rounded-[10px] border border-hairline bg-white px-3 py-2"
-                    rows={2}
-                    maxLength={500}
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                  />
-                </label>
-                <label className="block text-[14px]">
-                  <span className="text-ink/50">System instruction</span>
-                  <textarea
-                    className="mt-1 max-h-72 min-h-[12rem] w-full resize-y overflow-y-auto rounded-[10px] border border-hairline bg-white px-3 py-2 font-mono text-[13px] leading-relaxed"
-                    rows={10}
-                    value={editInstruction}
-                    onChange={(e) => setEditInstruction(e.target.value)}
-                  />
-                </label>
-                <div>
-                  <p className="text-[14px] text-ink/50">Tags (up to 3)</p>
-                  <div className="mt-1.5 flex flex-wrap gap-2">
-                    {TAG_OPTIONS.map((tag) => {
-                      const on = editTags.includes(tag)
-                      return (
-                        <button
-                          key={tag}
-                          type="button"
-                          className={`rounded-md border px-2.5 py-1 text-[13px] ${filterChipClass(on)}`}
-                          onClick={() =>
-                            setEditTags((prev) =>
-                              on
-                                ? prev.filter((t) => t !== tag)
-                                : prev.length >= 3
-                                  ? prev
-                                  : [...prev, tag],
-                            )
-                          }
-                        >
-                          {tag}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div>
+              <button
+                type="button"
+                aria-label="Close editor"
+                className="absolute inset-0 bg-black/55"
+                onClick={closeEdit}
+              />
+              <motion.div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="edit-state-title"
+                className="relative z-[1] flex max-h-[min(calc(100vh-6rem),720px)] w-full max-w-lg flex-col overflow-hidden rounded-[14px] border border-hairline bg-white shadow-2xl"
+                initial={reduceMotion ? false : { opacity: 0, y: 16, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={reduceMotion ? undefined : { opacity: 0, y: 10, scale: 0.98 }}
+                transition={{ duration: 0.2 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline px-5 py-4">
+                  <h2 id="edit-state-title" className="text-lg font-semibold">
+                    Edit {editingPost ? `“${editingPost.name}”` : 'state'}
+                  </h2>
                   <button
                     type="button"
-                    className="text-[13px] font-medium text-ink/55 hover:text-ink"
-                    onClick={() => setEditAdvanced((v) => !v)}
+                    className="pressable inline-flex h-9 w-9 items-center justify-center rounded-[8px] text-ink/50 hover:bg-paper-muted hover:text-ink"
+                    onClick={closeEdit}
+                    aria-label="Cancel"
                   >
-                    {editAdvanced ? 'Hide advanced options' : 'Advanced options'}
+                    <X className="h-5 w-5" strokeWidth={1.5} />
                   </button>
-                  {editAdvanced && (
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                      <label className="block text-[13px]">
-                        <span className="text-ink/50">Temperature</span>
-                        <input
-                          type="number"
-                          step={0.1}
-                          min={0}
-                          max={2}
-                          className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
-                          value={editTemp}
-                          onChange={(e) => setEditTemp(e.target.value)}
-                        />
-                      </label>
-                      <label className="block text-[13px]">
-                        <span className="text-ink/50">Max tokens</span>
-                        <input
-                          type="number"
-                          step={1}
-                          min={0}
-                          className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
-                          value={editMaxTokens}
-                          onChange={(e) => setEditMaxTokens(e.target.value)}
-                        />
-                      </label>
-                      <label className="block text-[13px]">
-                        <span className="text-ink/50">Frequency penalty</span>
-                        <input
-                          type="number"
-                          step={0.05}
-                          className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
-                          value={editFreq}
-                          onChange={(e) => setEditFreq(e.target.value)}
-                        />
-                      </label>
-                      <label className="block text-[13px]">
-                        <span className="text-ink/50">Presence penalty</span>
-                        <input
-                          type="number"
-                          step={0.05}
-                          className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
-                          value={editPresence}
-                          onChange={(e) => setEditPresence(e.target.value)}
-                        />
-                      </label>
-                    </div>
-                  )}
                 </div>
 
-                <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border border-hairline bg-white px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={editVisibility === 'public'}
-                    onChange={(e) =>
-                      setEditVisibility(e.target.checked ? 'public' : 'private')
-                    }
-                  />
-                  <span>
-                    <span className="block text-[14px] font-medium">Public in gallery</span>
-                    <span className="mt-0.5 block text-[12px] text-ink/50">
-                      Uncheck to make this state private again.
-                    </span>
-                  </span>
-                </label>
-              </div>
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+                  <label className="block text-[14px]">
+                    <span className="text-ink/50">Name</span>
+                    <input
+                      className="mt-1 w-full rounded-[10px] border border-hairline bg-white px-3 py-2"
+                      maxLength={64}
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                    />
+                  </label>
+                  <label className="block text-[14px]">
+                    <span className="text-ink/50">Description</span>
+                    <textarea
+                      className="mt-1 w-full rounded-[10px] border border-hairline bg-white px-3 py-2"
+                      rows={2}
+                      maxLength={500}
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                    />
+                  </label>
+                  <label className="block text-[14px]">
+                    <span className="text-ink/50">System instruction</span>
+                    <textarea
+                      className="mt-1 max-h-72 min-h-[12rem] w-full resize-y overflow-y-auto rounded-[10px] border border-hairline bg-white px-3 py-2 font-mono text-[13px] leading-relaxed"
+                      rows={10}
+                      value={editInstruction}
+                      onChange={(e) => setEditInstruction(e.target.value)}
+                    />
+                  </label>
+                  <div>
+                    <p className="text-[14px] text-ink/50">Tags (up to 3)</p>
+                    <div className="mt-1.5 flex flex-wrap gap-2">
+                      {TAG_OPTIONS.map((tag) => {
+                        const on = editTags.includes(tag)
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            className={`rounded-md border px-2.5 py-1 text-[13px] ${filterChipClass(on)}`}
+                            onClick={() =>
+                              setEditTags((prev) =>
+                                on
+                                  ? prev.filter((t) => t !== tag)
+                                  : prev.length >= 3
+                                    ? prev
+                                    : [...prev, tag],
+                              )
+                            }
+                          >
+                            {tag}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      className="text-[13px] font-medium text-ink/55 hover:text-ink"
+                      onClick={() => setEditAdvanced((v) => !v)}
+                    >
+                      {editAdvanced ? 'Hide advanced options' : 'Advanced options'}
+                    </button>
+                    {editAdvanced && (
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <label className="block text-[13px]">
+                          <span className="text-ink/50">Temperature</span>
+                          <input
+                            type="number"
+                            step={0.1}
+                            min={0}
+                            max={2}
+                            className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
+                            value={editTemp}
+                            onChange={(e) => setEditTemp(e.target.value)}
+                          />
+                        </label>
+                        <label className="block text-[13px]">
+                          <span className="text-ink/50">Max tokens</span>
+                          <input
+                            type="number"
+                            step={1}
+                            min={0}
+                            className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
+                            value={editMaxTokens}
+                            onChange={(e) => setEditMaxTokens(e.target.value)}
+                          />
+                        </label>
+                        <label className="block text-[13px]">
+                          <span className="text-ink/50">Frequency penalty</span>
+                          <input
+                            type="number"
+                            step={0.05}
+                            className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
+                            value={editFreq}
+                            onChange={(e) => setEditFreq(e.target.value)}
+                          />
+                        </label>
+                        <label className="block text-[13px]">
+                          <span className="text-ink/50">Presence penalty</span>
+                          <input
+                            type="number"
+                            step={0.05}
+                            className="mt-1 w-full rounded-[8px] border border-hairline bg-white px-2 py-1.5"
+                            value={editPresence}
+                            onChange={(e) => setEditPresence(e.target.value)}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
 
-              <div className="flex flex-wrap items-center gap-2 border-t border-hairline px-5 py-4">
-                <button
-                  type="button"
-                  disabled={busyId === editingId}
-                  className="pressable inline-flex min-h-10 items-center rounded-[10px] bg-black px-4 text-[14px] font-semibold text-white disabled:opacity-60"
-                  onClick={() => void saveOwnedEdit()}
-                >
-                  {busyId === editingId ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    'Save'
-                  )}
-                </button>
-                <button
-                  type="button"
-                  disabled={busyId === editingId}
-                  className="pressable ml-auto inline-flex min-h-10 items-center gap-1.5 rounded-[10px] border border-red-200 px-4 text-[14px] text-red-700 disabled:opacity-60"
-                  onClick={() => editingId && void handleDeleteOwned(editingId)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
-                  Delete
-                </button>
-              </div>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-[10px] border border-hairline bg-white px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={editVisibility === 'public'}
+                      onChange={(e) =>
+                        setEditVisibility(e.target.checked ? 'public' : 'private')
+                      }
+                    />
+                    <span>
+                      <span className="block text-[14px] font-medium">Public in gallery</span>
+                      <span className="mt-0.5 block text-[12px] text-ink/50">
+                        Uncheck to make this state private again.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
+                <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-hairline px-5 py-4">
+                  <button
+                    type="button"
+                    disabled={busyId === editingId}
+                    className="pressable inline-flex min-h-10 items-center rounded-[10px] bg-black px-4 text-[14px] font-semibold text-white disabled:opacity-60"
+                    onClick={() => void saveOwnedEdit()}
+                  >
+                    {busyId === editingId ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      'Save'
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === editingId}
+                    className="pressable ml-auto inline-flex min-h-10 items-center gap-1.5 rounded-[10px] border border-red-200 px-4 text-[14px] text-red-700 disabled:opacity-60"
+                    onClick={() => editingId && void handleDeleteOwned(editingId)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    Delete
+                  </button>
+                </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </>
   )
 }

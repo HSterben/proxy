@@ -79,6 +79,55 @@ export function selectHistoryNewestFirst(history, budgetTokens) {
   return picked
 }
 
+function contentFingerprint(content) {
+  if (typeof content === 'string') return content.trim()
+  if (!Array.isArray(content)) return String(content ?? '').trim()
+  return content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return ''
+      if (part.type === 'text') return String(part.text || '').trim()
+      if (part.type === 'image_url') return `img:${part.image_url?.url || ''}`
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+/**
+ * Drop consecutive duplicate user turns, and drop a trailing history user turn
+ * that matches the current message (legacy clients used to append current into
+ * history before the request, which made the model see the prompt twice).
+ */
+export function dedupeHistoryForCurrent(historyMessages, currentMessage) {
+  const history = Array.isArray(historyMessages) ? [...historyMessages] : []
+  const currentFp =
+    currentMessage?.role === 'user' ? contentFingerprint(currentMessage.content) : ''
+
+  while (
+    currentFp &&
+    history.length > 0 &&
+    history[history.length - 1]?.role === 'user' &&
+    contentFingerprint(history[history.length - 1].content) === currentFp
+  ) {
+    history.pop()
+  }
+
+  const out = []
+  for (const msg of history) {
+    const prev = out[out.length - 1]
+    if (
+      prev &&
+      prev.role === 'user' &&
+      msg?.role === 'user' &&
+      contentFingerprint(prev.content) === contentFingerprint(msg.content)
+    ) {
+      continue
+    }
+    out.push(msg)
+  }
+  return out
+}
+
 /**
  * @param {object} opts
  * @param {Array<{role: string, content: string|object[]}>} opts.historyMessages - prior turns as API messages (oldest first), excluding current
@@ -103,7 +152,7 @@ export function buildBudgetedMessages({
   }
 
   const historyBudget = limit - reserved
-  const history = Array.isArray(historyMessages) ? historyMessages : []
+  const history = dedupeHistoryForCurrent(historyMessages, currentMessage)
   const packedHistory = selectHistoryNewestFirst(history, historyBudget)
   const historyTokens = packedHistory.reduce((sum, m) => sum + estimateMessageTokens(m), 0)
 
@@ -121,19 +170,24 @@ export function buildBudgetedMessages({
 }
 
 /**
- * Convert local conversation turns (sender/text/images) to OpenAI-style messages,
- * excluding the current turn (passed separately).
+ * Convert prior conversation turns to OpenAI-style messages.
+ * Current turn is passed separately via currentTurnToApiMessage — do not put it in `history`.
+ *
+ * Prior images are summarized as text only. Re-sending full base64 data URLs on every
+ * follow-up balloons the request (often hangs the stream with no reply).
  */
 export function historyToApiMessages(history) {
   if (!Array.isArray(history)) return []
   return history.map((msg) => {
     const role = msg.sender === 'user' ? 'user' : 'assistant'
-    if (msg.images?.length > 0) {
-      const content = [{ type: 'text', text: msg.text || '' }]
-      for (const img of msg.images) {
-        content.push({ type: 'image_url', image_url: { url: img } })
-      }
-      return { role, content }
+    const imageCount = Array.isArray(msg.images) ? msg.images.length : 0
+    if (imageCount > 0) {
+      const label =
+        imageCount === 1
+          ? '[User attached 1 image earlier in this chat]'
+          : `[User attached ${imageCount} images earlier in this chat]`
+      const text = (msg.text || '').trim()
+      return { role, content: text ? `${text}\n\n${label}` : label }
     }
     return { role, content: msg.text || '' }
   })

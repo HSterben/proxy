@@ -22,14 +22,23 @@ const trayName = isMac ? "menu bar" : "tray";
 function formatKeybind(accel) {
   if (!accel) return "";
   const mod = isMac ? "⌘" : "Ctrl";
-  return accel
-    .replace(/CommandOrControl/g, mod)
-    .replace(/Command/g, "⌘")
-    .replace(/Control/g, "Ctrl")
-    .replace(/Option/g, "⌥")
-    .replace(/Alt/g, isMac ? "⌥" : "Alt")
-    .replace(/\+/g, " + ")
-    .trim();
+  // Split on "+" so spacing stays even (never " +  Alt" from double-formatting).
+  return String(accel)
+    .split("+")
+    .map((part) => {
+      const p = part.trim();
+      if (!p) return "";
+      if (/^CommandOrControl$/i.test(p) || /^CmdOrCtrl$/i.test(p)) return mod;
+      if (/^Command$/i.test(p) || /^Cmd$/i.test(p) || /^Meta$/i.test(p)) {
+        return isMac ? "⌘" : "Ctrl";
+      }
+      if (/^Control$/i.test(p) || /^Ctrl$/i.test(p)) return "Ctrl";
+      if (/^Option$/i.test(p) || /^Alt$/i.test(p)) return isMac ? "⌥" : "Alt";
+      if (/^Shift$/i.test(p)) return "Shift";
+      return p;
+    })
+    .filter(Boolean)
+    .join(" + ");
 }
 
 const KEY_TO_ACCEL = {
