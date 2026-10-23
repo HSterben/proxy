@@ -164,6 +164,7 @@ export default function States() {
     [libraryRows],
   )
   const libraryCount = libraryRows.length
+  const myStateNames = useMemo(() => Object.keys(myStates).sort(), [myStates])
 
   const applyLibrarySnapshot = (
     library: { id: string; name: string; description?: string; visibility?: Visibility; isOfficial?: boolean; isOwner?: boolean; isActive: boolean; state?: StateFields }[] | undefined,
